@@ -22,7 +22,7 @@ export async function generateAIText(
 
   try {
     // Create a promise that rejects after the timeout
-    const timeoutPromise = new Promise<{ success: boolean; error: string }>((_, reject) => {
+    const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
         reject(new Error(`AI request timed out after ${timeoutMs}ms`))
       }, timeoutMs)
@@ -36,7 +36,7 @@ export async function generateAIText(
       temperature,
       maxTokens,
     }).then((result) => ({
-      success: true,
+      success: true as const,
       text: result.text,
     }))
 
