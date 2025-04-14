@@ -260,6 +260,8 @@ main();`
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to generate code. Please try again.",
+      fallbackCode: `// Error occurred while generating code
+console.log("An error occurred during code generation");`,
     }
   }
 }

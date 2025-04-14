@@ -7,24 +7,28 @@ export interface AIServiceOptions {
   provider?: AIProvider
   temperature?: number
   maxTokens?: number
+  timeoutMs?: number
 }
 
+/**
+ * Generates text using the AI SDK with timeout handling
+ */
 export async function generateAIText(
   prompt: string,
   systemPrompt = "",
   options: AIServiceOptions = {},
 ): Promise<{ success: boolean; text?: string; error?: string }> {
-  const { temperature = 0.7, maxTokens } = options
+  const { temperature = 0.7, maxTokens, timeoutMs = 25000 } = options
 
   try {
-    // Add a timeout to prevent hanging requests
-    const timeoutPromise = new Promise<{ success: false; error: string }>((_, reject) => {
+    // Create a promise that rejects after the timeout
+    const timeoutPromise = new Promise<{ success: boolean; error: string }>((_, reject) => {
       setTimeout(() => {
-        reject(new Error("AI request timed out after 25 seconds"))
-      }, 25000) // 25 second timeout
+        reject(new Error(`AI request timed out after ${timeoutMs}ms`))
+      }, timeoutMs)
     })
 
-    // The actual AI request
+    // The actual AI request using the AI SDK
     const aiRequestPromise = generateText({
       model: openai("gpt-4o"),
       prompt,
