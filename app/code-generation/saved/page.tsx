@@ -1,10 +1,9 @@
 import { getGeneratedCode } from "../actions"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-import { formatDistanceToNow } from "date-fns"
-import { ArrowLeft, Code, FileCode } from "lucide-react"
-import { DeleteCodeButton } from "@/components/delete-code-button"
+import { ArrowLeft, Code } from "lucide-react"
+import { CardHeaderWithDelete } from "./card-header"
 
 export default async function SavedCodePage() {
   const { success, data, error } = await getGeneratedCode()
@@ -78,20 +77,12 @@ export default async function SavedCodePage() {
 
           return (
             <Card key={item.id} className="h-full flex flex-col">
-              <CardHeader className="flex flex-row items-start justify-between">
-                <div>
-                  <CardTitle className="flex items-center">
-                    <FileCode className="mr-2 h-5 w-5" />
-                    <span className="truncate">
-                      {item.language} / {item.framework}
-                    </span>
-                  </CardTitle>
-                  <CardDescription>
-                    {item.created_at && <span>Created {formatDistanceToNow(new Date(item.created_at))} ago</span>}
-                  </CardDescription>
-                </div>
-                <DeleteCodeButton id={item.id} />
-              </CardHeader>
+              <CardHeaderWithDelete
+                id={item.id}
+                language={item.language}
+                framework={item.framework}
+                createdAt={item.created_at}
+              />
               <CardContent className="flex-grow">
                 <div className="mb-4">
                   <div className="text-sm font-medium mb-1">Requirements:</div>
