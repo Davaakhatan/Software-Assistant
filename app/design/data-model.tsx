@@ -519,7 +519,8 @@ Do not include any explanatory text, only the Mermaid diagram code.
     try {
       // Find the specification to get its name for the project
       const spec = specifications.find((s) => s.id === specificationId)
-      const projectName = spec ? spec.app_name : "Unknown Project"
+      const projectName = spec && spec.app_name ? spec.app_name : "Unknown Project"
+      console.log("Using project name:", projectName, "from specification:", spec)
 
       // Create a temporary requirement ID linked to this specification
       // This is needed because the current saveDesign function expects a requirementId
@@ -543,7 +544,7 @@ Do not include any explanatory text, only the Mermaid diagram code.
           .from("requirements")
           .insert({
             project_name: projectName,
-            project_description: `Auto-generated from specification: ${projectName}`,
+            project_description: `Data model for ${projectName} - ${spec?.app_type || "Application"}`,
             specification_id: specificationId,
           })
           .select()

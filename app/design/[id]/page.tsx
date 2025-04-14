@@ -31,8 +31,9 @@ export default async function DesignDetails({ params }) {
     )
   }
 
-  // Use the project_name property we added, or default to "Unknown Project"
-  const projectName = design.project_name || "Unknown Project"
+  // Use the project_name property directly from the design, or fall back to requirements
+  const projectName =
+    design.project_name || (design.requirements && design.requirements.project_name) || "Unknown Project"
 
   return (
     <div className="container mx-auto px-4 py-12">

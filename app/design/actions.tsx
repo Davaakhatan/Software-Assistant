@@ -32,12 +32,43 @@ export async function saveDesign({ type, diagramCode, requirementId }) {
   try {
     const supabaseServer = getSupabaseServer()
 
+    // First, get the project name from the requirement
+    let projectName = "Unknown Project"
+
+    if (requirementId) {
+      const { data: requirement, error: reqError } = await supabaseServer
+        .from("requirements")
+        .select("project_name, specification_id")
+        .eq("id", requirementId)
+        .single()
+
+      if (!reqError && requirement) {
+        projectName = requirement.project_name
+
+        // If there's a specification_id, try to get the app_name from there
+        if (requirement.specification_id && (projectName === "Unknown Project" || !projectName)) {
+          const { data: spec, error: specError } = await supabaseServer
+            .from("specifications")
+            .select("app_name")
+            .eq("id", requirement.specification_id)
+            .single()
+
+          if (!specError && spec && spec.app_name) {
+            projectName = spec.app_name
+          }
+        }
+      }
+    }
+
+    console.log("Saving design with project name:", projectName)
+
     const { data, error } = await supabaseServer
       .from("designs")
       .insert({
-        type,
+        type: type === "data" ? "data-model" : type,
         diagram_code: diagramCode,
         requirement_id: requirementId,
+        project_name: projectName, // Store the project name directly in the designs table
       })
       .select()
 
@@ -117,12 +148,41 @@ export async function updateDesign(id, { type, diagramCode, requirementId }) {
   try {
     const supabaseServer = getSupabaseServer()
 
+    // Get the project name from the requirement
+    let projectName = "Unknown Project"
+
+    if (requirementId) {
+      const { data: requirement, error: reqError } = await supabaseServer
+        .from("requirements")
+        .select("project_name, specification_id")
+        .eq("id", requirementId)
+        .single()
+
+      if (!reqError && requirement) {
+        projectName = requirement.project_name
+
+        // If there's a specification_id, try to get the app_name from there
+        if (requirement.specification_id && (projectName === "Unknown Project" || !projectName)) {
+          const { data: spec, error: specError } = await supabaseServer
+            .from("specifications")
+            .select("app_name")
+            .eq("id", requirement.specification_id)
+            .single()
+
+          if (!specError && spec && spec.app_name) {
+            projectName = spec.app_name
+          }
+        }
+      }
+    }
+
     const { data, error } = await supabaseServer
       .from("designs")
       .update({
-        type,
+        type: type === "data" ? "data-model" : type,
         diagram_code: diagramCode,
-        project_id: requirementId,
+        requirement_id: requirementId,
+        project_name: projectName, // Update the project name
       })
       .eq("id", id)
       .select()

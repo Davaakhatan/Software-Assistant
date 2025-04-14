@@ -67,11 +67,44 @@ export async function saveSystemArchitecture({ type, diagramCode, requirementId 
       console.log("No authenticated user found. Using default user ID for development.")
     }
 
+    // Get the project name from the requirement or specification
+    let projectName = "Unknown Project"
+
+    if (requirementId) {
+      const { data: requirement, error: reqError } = await supabase
+        .from("requirements")
+        .select("project_name, specification_id")
+        .eq("id", requirementId)
+        .single()
+
+      if (!reqError && requirement) {
+        projectName = requirement.project_name
+
+        // If there's a specification_id, try to get the app_name from there
+        if (requirement.specification_id && (projectName === "Unknown Project" || !projectName)) {
+          const { data: spec, error: specError } = await supabase
+            .from("specifications")
+            .select("app_name")
+            .eq("id", requirement.specification_id)
+            .single()
+
+          if (!specError && spec && spec.app_name) {
+            projectName = spec.app_name
+            console.log("Using app_name from specification:", projectName)
+          }
+        }
+      }
+    }
+
     // Try a simple insert with minimal fields first
     const insertData = {
       diagram_code: diagramCode,
       type: type || "architecture",
+      requirement_id: requirementId,
+      project_name: projectName, // Add the project name
     }
+
+    console.log("Saving system architecture with project name:", projectName)
 
     // Try to insert with just the minimal fields
     const { data, error } = await supabase.from("designs").insert(insertData).select()
@@ -89,6 +122,8 @@ export async function saveSystemArchitecture({ type, diagramCode, requirementId 
             id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             diagram_code TEXT NOT NULL,
             type TEXT,
+            project_name TEXT,
+            requirement_id UUID,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
           );
         `
@@ -132,7 +167,10 @@ export async function saveSystemArchitecture({ type, diagramCode, requirementId 
         // Try an even more minimal insert
         const { data: basicData, error: basicError } = await supabase
           .from("designs")
-          .insert({ diagram_code: diagramCode })
+          .insert({
+            diagram_code: diagramCode,
+            project_name: projectName, // Still include the project name
+          })
           .select()
 
         if (basicError) {

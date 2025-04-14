@@ -56,7 +56,12 @@ export default async function DesignsList() {
           {designs.map((design) => (
             <Card key={design.id} className="flex flex-col">
               <CardHeader>
-                <CardTitle>{design.requirements?.project_name || "Unknown App"}</CardTitle>
+                <CardTitle>
+                  {design.project_name ||
+                    design.requirements?.project_name ||
+                    design.requirements?.specifications?.app_name ||
+                    "Unknown App"}
+                </CardTitle>
                 <CardDescription>
                   {design.type === "architecture"
                     ? "System Architecture"

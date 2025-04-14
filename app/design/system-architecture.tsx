@@ -292,6 +292,8 @@ Do not include any explanatory text, only the Mermaid diagram code.
       const spec = specifications.find((s) => s.id === specificationId)
       const projectName = spec ? spec.app_name : "Unknown Project"
 
+      console.log("Saving system architecture for project:", projectName)
+
       // Use the server action to create a requirement
       const requirementResult = await createRequirementForSpecification(specificationId, projectName)
 
