@@ -5,9 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import Link from "next/link"
 import { ArrowLeft, Copy, Download } from "lucide-react"
 import { formatDate } from "@/lib/utils"
+// Fix the import for DeleteCodeButton and getGeneratedCodeById
 import DeleteCodeButton from "./delete-button"
+import { getGeneratedCodeById } from "@/app/code-generation/actions"
 import { Suspense } from "react"
-import { getGeneratedCodeById } from "../actions"
 
 export default async function ViewGeneratedCodePage({ params }) {
   const { data: code, success, error } = await getGeneratedCodeById(params.id)
