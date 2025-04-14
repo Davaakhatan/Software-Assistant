@@ -64,7 +64,8 @@
     "@ai-sdk/openai": "latest",
     "openai": "latest",
     "@supabase/auth-helpers-nextjs": "latest",
-    "mermaid": "latest"
+    "mermaid": "latest",
+    "prismjs": "latest"
   },
   "devDependencies": {
     "@types/node": "^22",
