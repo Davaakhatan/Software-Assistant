@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { CodeBlock } from "@/components/code-block"
+import { CopyButton } from "@/components/copy-button"
 
 export const metadata: Metadata = {
   title: "View Generated Code | SDLC Companion",
@@ -79,11 +80,14 @@ export default async function CodeGenerationPage({ params }: { params: { id: str
         )}
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between">
             <CardTitle>Generated Code</CardTitle>
+            <CopyButton text={data.generated_code} />
           </CardHeader>
           <CardContent>
-            <CodeBlock code={data.generated_code} language={data.language.toLowerCase()} />
+            <div className="relative">
+              <CodeBlock code={data.generated_code} language={data.language.toLowerCase()} />
+            </div>
           </CardContent>
         </Card>
       </div>
