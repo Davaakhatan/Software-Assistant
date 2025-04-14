@@ -17,34 +17,39 @@ export async function generateAIText(
   const { temperature = 0.7, maxTokens } = options
 
   try {
-    console.time("AI generation time")
-
-    // Add a timeout to prevent hanging indefinitely
+    // Add a timeout to prevent hanging requests
     const timeoutPromise = new Promise<{ success: false; error: string }>((_, reject) => {
       setTimeout(() => {
-        reject({ success: false, error: "AI generation timed out after 50 seconds" })
-      }, 50000) // 50 second timeout
+        reject(new Error("AI request timed out after 25 seconds"))
+      }, 25000) // 25 second timeout
     })
 
-    const generationPromise = generateText({
+    // The actual AI request
+    const aiRequestPromise = generateText({
       model: openai("gpt-4o"),
       prompt,
       system: systemPrompt,
       temperature,
       maxTokens,
-    })
-
-    // Race between the AI generation and the timeout
-    const result = await Promise.race([generationPromise, timeoutPromise])
-
-    console.timeEnd("AI generation time")
-
-    return {
+    }).then((result) => ({
       success: true,
       text: result.text,
-    }
+    }))
+
+    // Race between the timeout and the actual request
+    const result = await Promise.race([aiRequestPromise, timeoutPromise])
+    return result
   } catch (error) {
     console.error("Error generating text with AI:", error)
+
+    // Check if it's a timeout error
+    if (error instanceof Error && error.message.includes("timed out")) {
+      return {
+        success: false,
+        error: "The AI service took too long to respond. Please try with a simpler request or try again later.",
+      }
+    }
+
     return {
       success: false,
       error: error instanceof Error ? error.message : "An unexpected error occurred",
