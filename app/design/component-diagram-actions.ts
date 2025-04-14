@@ -62,19 +62,55 @@ export async function saveComponentDiagram({ type, diagramCode, requirementId })
     // For development purposes, create a default user ID if not authenticated
     const userId = user?.id || "00000000-0000-0000-0000-000000000000" // Default user ID for development
 
-    // Save the design
-    const { data, error } = await supabase
-      .from("designs")
-      .insert({
-        type,
-        diagram_code: diagramCode,
-        requirement_id: requirementId,
-        user_id: userId,
-      })
-      .select()
+    // Create a base insert object with required fields
+    const insertData = {
+      type,
+      diagram_code: diagramCode,
+    }
+
+    // Add optional fields if they exist in the schema
+    if (requirementId) {
+      insertData["requirement_id"] = requirementId
+    }
+
+    // Try to insert with minimal required fields first
+    const { data, error } = await supabase.from("designs").insert(insertData).select()
 
     if (error) {
       console.error("Error saving design:", error)
+
+      // If the error is about missing columns, try a more basic approach
+      if (
+        error.message.includes("column") &&
+        (error.message.includes("user_id") || error.message.includes("requirement_id"))
+      ) {
+        console.log("Column error detected. Trying simplified insert...")
+
+        // Try an even more minimal insert with just the diagram code and type
+        const { data: basicData, error: basicError } = await supabase
+          .from("designs")
+          .insert({
+            diagram_code: diagramCode,
+            type: type || "component",
+          })
+          .select()
+
+        if (basicError) {
+          // If the table doesn't exist, we might need to create it
+          if (basicError.message.includes("relation") && basicError.message.includes("does not exist")) {
+            console.log("Designs table doesn't exist. Please run the setup SQL first.")
+            return {
+              success: false,
+              error: "The designs table does not exist. Please visit the /design page first to set up the database.",
+            }
+          }
+
+          return { success: false, error: `Simplified insert also failed: ${basicError.message}` }
+        }
+
+        return { success: true, data: basicData }
+      }
+
       return { success: false, error: error.message }
     }
 

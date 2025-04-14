@@ -41,7 +41,7 @@ export default function SystemArchitecture() {
           setFetchError(result.error || "Failed to load specifications")
           toast({
             title: "Error",
-            description: result.error || "Failed to load specifications",
+            description: "Failed to load specifications",
             variant: "destructive",
           })
         }
@@ -113,7 +113,8 @@ export default function SystemArchitecture() {
       const extractedDiagram = extractDiagramFromSpecification(specData)
 
       if (extractedDiagram) {
-        setDiagramCode(extractedDiagram)
+        const formattedDiagram = formatDiagram(extractedDiagram)
+        setDiagramCode(formattedDiagram)
         toast({
           title: "Diagram extracted",
           description: "System architecture diagram was extracted from the specification",
@@ -121,7 +122,8 @@ export default function SystemArchitecture() {
       } else {
         // Generate a diagram based on the specification data
         const generatedDiagram = await generateDiagramWithAI(specData)
-        setDiagramCode(generatedDiagram)
+        const formattedDiagram = formatDiagram(generatedDiagram)
+        setDiagramCode(formattedDiagram)
         toast({
           title: "System architecture generated",
           description: "System architecture has been generated based on the selected specification",
@@ -205,13 +207,14 @@ Use subgraphs to group related components.
 IMPORTANT FORMATTING RULES:
 1. Start with "graph LR" or "graph TD" on its own line
 2. Put each subgraph declaration on its own line
-3. Put quotes around subgraph names that contain spaces
-4. Put quotes around node text that contains spaces or special characters
+3. Enclose subgraph names in quotes, especially if they contain spaces or special characters
+4. Enclose node text in quotes if it contains spaces or special characters
 5. Put each node and connection on its own line
-6. End each subgraph with "end" on its own line
+6. End each subgraph with "end" on its own line - MAKE SURE "end" IS ON ITS OWN LINE
 7. Use proper spacing around arrows (e.g., "A --> B" not "A-->B")
 8. Put comments on their own lines, not at the end of other lines
-9. For multiple connections, use separate lines (e.g., "A --> B" and "B --> C" not "A --> B --> C")
+9. NEVER use "endsubgraph" - always use "end" on its own line
+10. For multiple connections, use separate lines (e.g., "A --> B" and "B --> C" not "A --> B --> C")
 
 Do not include any explanatory text, only the Mermaid diagram code.
 `
@@ -245,9 +248,14 @@ Do not include any explanatory text, only the Mermaid diagram code.
         diagramCode = mermaidMatch[1].trim()
       } else {
         // If no mermaid code block found, look for graph LR or graph TD
-        const graphMatch = diagramCode.match(/(graph\s+(?:LR|TD)[\s\S]*?)(?:\n\n|\n$|$)/)
-        if (graphMatch && graphMatch[1]) {
-          diagramCode = graphMatch[1].trim()
+        const flowchartMatch = diagramCode.match(/(graph\s+(?:LR|TD)[\s\S]*?)(?:\n\n|\n$|$)/)
+        if (flowchartMatch && flowchartMatch[1]) {
+          diagramCode = flowchartMatch[1].trim()
+        } else {
+          const graphMatch = diagramCode.match(/(graph\s+(?:TD|LR)[\s\S]*?)(?:\n\n|\n$|$)/)
+          if (graphMatch && graphMatch[1]) {
+            diagramCode = graphMatch[1].trim()
+          }
         }
       }
 
@@ -255,6 +263,9 @@ Do not include any explanatory text, only the Mermaid diagram code.
       if (!diagramCode.includes("graph")) {
         return generateDefaultDiagram(specData)
       }
+
+      // Fix any "endsubgraph" issues before returning
+      diagramCode = diagramCode.replace(/endsubgraph/g, "end\nsubgraph")
 
       return diagramCode
     } catch (error) {
@@ -304,13 +315,12 @@ Do not include any explanatory text, only the Mermaid diagram code.
         // Clear any schema warnings since the save was successful
         setSchemaWarning(null)
       } else {
-        // Check if this is an authentication error
         if (result.error && result.error.includes("not authenticated")) {
           setAuthWarning(true)
-          // Still show a success message in development mode
           toast({
-            title: "System architecture saved (Development Mode)",
-            description: "Your system architecture has been saved with a default user ID.",
+            title: "Authentication Notice",
+            description: "Using development mode for saving. In production, authentication would be required.",
+            variant: "default",
           })
         } else if (result.error && (result.error.includes("column") || result.error.includes("schema"))) {
           // This is a schema error
@@ -331,10 +341,10 @@ Do not include any explanatory text, only the Mermaid diagram code.
       // Check if this is an authentication error
       if (error.message && error.message.includes("not authenticated")) {
         setAuthWarning(true)
-        // Show a modified success message for development mode
         toast({
-          title: "Development Mode",
-          description: "Saving with default user ID. Authentication will be required in production.",
+          title: "Authentication Notice",
+          description: "Using development mode for saving. In production, authentication would be required.",
+          variant: "default",
         })
       } else if (error.message && (error.message.includes("column") || error.message.includes("schema"))) {
         // This is a schema error
@@ -354,6 +364,90 @@ Do not include any explanatory text, only the Mermaid diagram code.
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  // Function to generate a default diagram based on the specification data
+  const generateDefaultDiagram = (specData) => {
+    const appName = specData.app_name || "Application"
+    const appType = specData.app_type || "web"
+    console.log(`Generating component diagram for ${appType} application: ${appName}`)
+
+    let generatedDiagram = `flowchart TD\n`
+
+    // Add frontend components based on app type
+    generatedDiagram += `  subgraph "Frontend"\n`
+
+    if (appType === "ecommerce") {
+      generatedDiagram += `    UI["User Interface"]\n    ProductList["Product Listing"]\n    ProductDetail["Product Detail"]\n    Cart["Shopping Cart"]\n    Checkout["Checkout Process"]\n    UserProfile["User Profile"]\n`
+    } else if (appType === "crm") {
+      generatedDiagram += `    UI["User Interface"]\n    Dashboard["Dashboard"]\n    ContactList["Contact Management"]\n    LeadList["Lead Management"]\n    Calendar["Calendar"]\n    Reports["Reports"]\n`
+    } else if (appType === "mobile") {
+      generatedDiagram += `    UI["Mobile UI"]\n    Navigation["Navigation"]\n    Screens["App Screens"]\n    StateManager["State Management"]\n    LocalStorage["Local Storage"]\n    Notifications["Push Notifications"]\n`
+    } else {
+      generatedDiagram += `    UI["User Interface"]\n    Auth["Authentication UI"]\n    Dashboard["Dashboard"]\n    Forms["Form Components"]\n    UserProfile["User Profile"]\n`
+    }
+
+    generatedDiagram += `  end\n\n`
+
+    // Add backend components
+    generatedDiagram += `  subgraph "Backend"\n`
+
+    if (appType === "ecommerce") {
+      generatedDiagram += `    API["API Gateway"]\n    ProductService["Product Service"]\n    CartService["Cart Service"]\n    OrderService["Order Service"]\n    PaymentService["Payment Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
+    } else if (appType === "crm") {
+      generatedDiagram += `    API["API Gateway"]\n    ContactService["Contact Service"]\n    LeadService["Lead Service"]\n    CalendarService["Calendar Service"]\n    ReportService["Report Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
+    } else if (appType === "mobile") {
+      generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    DataService["Data Service"]\n    SyncService["Sync Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
+    } else {
+      generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    ContentService["Content Service"]\n    UserService["User Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
+    }
+
+    generatedDiagram += `  end\n\n`
+
+    // Add connections between components
+    if (appType === "ecommerce") {
+      generatedDiagram += `  UI --> ProductList\n  UI --> ProductDetail\n  UI --> Cart\n  UI --> Checkout\n  UI --> UserProfile\n\n`
+      generatedDiagram += `  ProductList --> API\n  ProductDetail --> API\n  Cart --> API\n  Checkout --> API\n  UserProfile --> API\n\n`
+      generatedDiagram += `  API --> ProductService\n  API --> CartService\n  API --> OrderService\n  API --> PaymentService\n  UserService --> DB\n\n`
+      generatedDiagram += `  ProductService --> DB\n  CartService --> DB\n  OrderService --> DB\n  PaymentService --> DB\n  UserService --> DB\n`
+    } else if (appType === "crm") {
+      generatedDiagram += `  UI --> Dashboard\n  UI --> ContactList\n  UI --> LeadList\n  UI --> Calendar\n  UI --> Reports\n\n`
+      generatedDiagram += `  Dashboard --> API\n  ContactList --> API\n  LeadList --> API\n  Calendar --> API\n  Reports --> API\n\n`
+      generatedDiagram += `  API --> ContactService\n  API --> LeadService\n  API --> CalendarService\n  ReportService --> API\n  UserService --> DB\n\n`
+      generatedDiagram += `  ContactService --> DB\n  LeadService --> DB\n  CalendarService --> DB\n  ReportService --> DB\n  UserService --> DB\n`
+    } else if (appType === "mobile") {
+      generatedDiagram += `  UI --> Navigation\n  Navigation --> Screens\n  Screens --> StateManager\n  StateManager --> LocalStorage\n  StateManager --> API\n\n`
+      generatedDiagram += `  API --> AuthService\n  API --> DataService\n  API --> SyncService\n  API --> NotificationService\n\n`
+      generatedDiagram += `  AuthService --> DB\n  DataService --> DB\n  SyncService --> DB\n  NotificationService --> DB\n`
+    } else {
+      generatedDiagram += `  UI --> Auth\n  UI --> Dashboard\n  UI --> Forms\n  UserProfile --> API\n\n`
+      generatedDiagram += `  Auth --> API\n  Dashboard --> API\n  Forms --> API\n  UserProfile --> API\n\n`
+      generatedDiagram += `  API --> AuthService\n  API --> ContentService\n  API --> UserService\n  API --> NotificationService\n\n`
+      generatedDiagram += `  AuthService --> DB\n  ContentService --> DB\n  UserService --> DB\n  NotificationService --> DB\n`
+    }
+
+    console.log("Generated component diagram successfully")
+    return generatedDiagram
+  }
+
+  // Function to format the diagram code
+  const formatDiagram = (diagramCode) => {
+    // Trim leading/trailing whitespace
+    diagramCode = diagramCode.trim()
+
+    // Ensure that the diagram starts with "graph"
+    if (
+      !diagramCode.startsWith("graph LR") &&
+      !diagramCode.startsWith("graph TD") &&
+      !diagramCode.startsWith("flowchart TD")
+    ) {
+      diagramCode = "flowchart TD\n" + diagramCode
+    }
+
+    // Add a newline character at the end of each line
+    diagramCode = diagramCode.split("\n").join("\n")
+
+    return diagramCode
   }
 
   return (
@@ -387,23 +481,8 @@ Do not include any explanatory text, only the Mermaid diagram code.
               <div>
                 <p className="font-medium">Development Mode</p>
                 <p className="text-sm">
-                  No authenticated user detected. Using a default user ID for development purposes.
-                </p>
-                <p className="text-sm mt-1">
-                  In production, users will need to be authenticated to save system architecture diagrams.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {schemaWarning && (
-            <div className="mb-4 p-4 border border-amber-200 bg-amber-50 rounded-md flex items-center gap-2 text-amber-700">
-              <Info className="h-5 w-5" />
-              <div>
-                <p className="font-medium">Database Schema Notice</p>
-                <p className="text-sm">{schemaWarning}</p>
-                <p className="text-sm mt-1">
-                  The system will attempt to create or adapt to the database schema automatically when you save.
+                  You are not currently authenticated. In development mode, diagrams will be saved with a default user
+                  ID.
                 </p>
               </div>
             </div>
@@ -479,11 +558,6 @@ Do not include any explanatory text, only the Mermaid diagram code.
                     No diagram to preview. Generate or enter a diagram.
                   </div>
                 )}
-                {previewError && (
-                  <div className="mt-2 p-2 text-sm text-red-500 bg-red-50 border border-red-200 rounded">
-                    Error: {previewError}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -493,61 +567,85 @@ Do not include any explanatory text, only the Mermaid diagram code.
   )
 }
 
-// Update the generateDefaultDiagram function to ensure proper formatting of node labels
-
-function generateDefaultDiagram(specData) {
+// Update the generateDefaultDiagram function to ensure proper formatting
+const generateDefaultDiagram = (specData) => {
   const appName = specData.app_name || "Application"
   const appType = specData.app_type || "web"
+  console.log(`Generating component diagram for ${appType} application: ${appName}`)
 
-  let diagram = `graph LR\n`
+  let generatedDiagram = `flowchart TD\n`
 
-  // Client section
-  diagram += `  subgraph Client\n`
-  diagram += `    Browser(("${"Browser"}"))\n`
-  if (appType === "mobile") {
-    diagram += `    MobileApp(("${"Mobile App"}"))\n`
+  // Add frontend components based on app type
+  generatedDiagram += `  subgraph "Frontend"\n`
+
+  if (appType === "ecommerce") {
+    generatedDiagram += `    UI["User Interface"]\n    ProductList["Product Listing"]\n    ProductDetail["Product Detail"]\n    Cart["Shopping Cart"]\n    Checkout["Checkout Process"]\n    UserProfile["User Profile"]\n`
+  } else if (appType === "crm") {
+    generatedDiagram += `    UI["User Interface"]\n    Dashboard["Dashboard"]\n    ContactList["Contact Management"]\n    LeadList["Lead Management"]\n    Calendar["Calendar"]\n    Reports["Reports"]\n`
+  } else if (appType === "mobile") {
+    generatedDiagram += `    UI["Mobile UI"]\n    Navigation["Navigation"]\n    Screens["App Screens"]\n    StateManager["State Management"]\n    LocalStorage["Local Storage"]\n    Notifications["Push Notifications"]\n`
+  } else {
+    generatedDiagram += `    UI["User Interface"]\n    Auth["Authentication UI"]\n    Dashboard["Dashboard"]\n    Forms["Form Components"]\n    UserProfile["User Profile"]\n`
   }
-  diagram += `  end\n\n`
 
-  // Server section
-  diagram += `  subgraph Server\n`
-  diagram += `    LB(("Load Balancer"))\n`
-  diagram += `    API(("API Gateway"}"))\n`
-  diagram += `    Auth(("Authentication"))\n`
-  diagram += `    Logic(("Business Logic"))\n`
-  diagram += `  end\n\n`
+  generatedDiagram += `  end\n\n`
 
-  // Database section
-  diagram += `  subgraph Database\n`
-  diagram += `    DB(("Database"))\n`
-  diagram += `  end\n\n`
+  // Add backend components
+  generatedDiagram += `  subgraph "Backend"\n`
 
-  // Connections - one per line
-  diagram += `  Browser --> LB\n`
-  if (appType === "mobile") {
-    diagram += `  MobileApp --> LB\n`
+  if (appType === "ecommerce") {
+    generatedDiagram += `    API["API Gateway"]\n    ProductService["Product Service"]\n    CartService["Cart Service"]\n    OrderService["Order Service"]\n    PaymentService["Payment Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
+  } else if (appType === "crm") {
+    generatedDiagram += `    API["API Gateway"]\n    ContactService["Contact Service"]\n    LeadService["Lead Service"]\n    CalendarService["Calendar Service"]\n    ReportService["Report Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
+  } else if (appType === "mobile") {
+    generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    DataService["Data Service"]\n    SyncService["Sync Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
+  } else {
+    generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    ContentService["Content Service"]\n    UserService["User Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
   }
-  diagram += `  LB --> API\n`
-  diagram += `  API --> Auth\n`
-  diagram += `  API --> Logic\n`
-  diagram += `  Logic --> DB\n`
 
-  // Add cloud services if mentioned in the specification
+  generatedDiagram += `  end\n\n`
+
+  // Add connections between components
+  if (appType === "ecommerce") {
+    generatedDiagram += `  UI --> ProductList\n  UI --> ProductDetail\n  UI --> Cart\n  UI --> Checkout\n  UI --> UserProfile\n\n`
+    generatedDiagram += `  ProductList --> API\n  ProductDetail --> API\n  Cart --> API\n  Checkout --> API\n  UserProfile --> API\n\n`
+    generatedDiagram += `  API --> ProductService\n  API --> CartService\n  API --> OrderService\n  API --> PaymentService\n  UserService --> DB\n\n`
+    generatedDiagram += `  ProductService --> DB\n  CartService --> DB\n  OrderService --> DB\n  PaymentService --> DB\n  UserService --> DB\n`
+  } else if (appType === "crm") {
+    generatedDiagram += `  UI --> Dashboard\n  UI --> ContactList\n  UI --> LeadList\n  UI --> Calendar\n  UI --> Reports\n\n`
+    generatedDiagram += `  Dashboard --> API\n  ContactList --> API\n  LeadList --> API\n  Calendar --> API\n  Reports --> API\n\n`
+    generatedDiagram += `  API --> ContactService\n  API --> LeadService\n  API --> CalendarService\n  ReportService --> API\n  UserService --> DB\n\n`
+    generatedDiagram += `  ContactService --> DB\n  LeadService --> DB\n  CalendarService --> DB\n  ReportService --> DB\n  UserService --> DB\n`
+  } else if (appType === "mobile") {
+    generatedDiagram += `  UI --> Navigation\n  Navigation --> Screens\n  Screens --> StateManager\n  StateManager --> LocalStorage\n  StateManager --> API\n\n`
+    generatedDiagram += `  API --> AuthService\n  API --> DataService\n  API --> SyncService\n  API --> NotificationService\n\n`
+    generatedDiagram += `  AuthService --> DB\n  DataService --> DB\n  SyncService --> DB\n  NotificationService --> DB\n`
+  } else {
+    generatedDiagram += `  UI --> Auth\n  UI --> Dashboard\n  UI --> Forms\n  UserProfile --> API\n\n`
+    generatedDiagram += `  Auth --> API\n  Dashboard --> API\n  Forms --> API\n  UserProfile --> API\n\n`
+    generatedDiagram += `  API --> AuthService\n  API --> ContentService\n  API --> UserService\n  API --> NotificationService\n\n`
+    generatedDiagram += `  AuthService --> DB\n  ContentService --> DB\n  UserService --> DB\n  NotificationService --> DB\n`
+  }
+
+  console.log("Generated component diagram successfully")
+  return generatedDiagram
+}
+
+function formatDiagram(diagramCode) {
+  // Trim leading/trailing whitespace
+  diagramCode = diagramCode.trim()
+
+  // Ensure the diagram starts with "graph LR" or "graph TD"
   if (
-    specData.system_architecture &&
-    (specData.system_architecture.toLowerCase().includes("aws") ||
-      specData.system_architecture.toLowerCase().includes("cloud") ||
-      specData.system_architecture.toLowerCase().includes("s3"))
+    !diagramCode.startsWith("graph LR") &&
+    !diagramCode.startsWith("graph TD") &&
+    !diagramCode.startsWith("flowchart TD")
   ) {
-    diagram += `\n  subgraph "Cloud Services"\n`
-    diagram += `    Storage(("Storage"))\n`
-    diagram += `    Notification(("Notifications"))\n`
-    diagram += `  end\n\n`
-    diagram += `  Logic --> Storage\n`
-    diagram += `  Logic --> Notification\n`
+    diagramCode = "flowchart TD\n" + diagramCode
   }
 
-  diagram += `\n`
+  // Add a newline character at the end of each line
+  diagramCode = diagramCode.split("\n").join("\n")
 
-  return diagram
+  return diagramCode
 }

@@ -15,14 +15,14 @@ import { createRequirementForSpecification, saveComponentDiagram } from "./compo
 export default function ComponentDiagram() {
   const { toast } = useToast()
   const [diagramCode, setDiagramCode] = useState(`flowchart TD
-  subgraph "Frontend"
+  subgraph Frontend
     UI["User Interface"]
     Auth["Auth Component"]
     Forms["Form Components"]
     Dashboard["Dashboard Component"]
   end
   
-  subgraph "Backend"
+  subgraph Backend
     API["API Layer"]
     Services["Service Layer"]
     DB["Data Access Layer"]
@@ -49,7 +49,6 @@ export default function ComponentDiagram() {
   const [fetchError, setFetchError] = useState(null)
   const [authWarning, setAuthWarning] = useState(false)
 
-  // Update to fetch specifications on component mount
   useEffect(() => {
     const fetchSpecifications = async () => {
       try {
@@ -113,7 +112,14 @@ export default function ComponentDiagram() {
     if (!code) return ""
 
     // First, normalize line breaks to ensure consistent processing
-    const formatted = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+    let formatted = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+
+    // Fix the specific issue with "endsubgraph"
+    formatted = formatted.replace(/endsubgraph/g, "end\nsubgraph")
+
+    // Ensure 'end' is always on its own line
+    formatted = formatted.replace(/(\S+)\s*end(\s|$)/g, "$1\nend$2")
+    formatted = formatted.replace(/end\s*(\S+)/g, "end\n$1")
 
     // Split into lines and process each line
     const lines = formatted
@@ -170,7 +176,7 @@ export default function ComponentDiagram() {
             if (title.includes(" ") && !title.startsWith('"') && !title.endsWith('"')) {
               result += `subgraph "${title}"\n`
             } else {
-              result += `subgraph ${title}\n`
+              result += `${line}\n`
             }
           } else {
             result += `${line}\n`
@@ -191,8 +197,8 @@ export default function ComponentDiagram() {
           })
 
           // Fix parentheses in node text
-          line = line.replace(/\[([^\]]*$$[^)]*$$[^\]]*)\]/g, (match) => {
-            return match.replace(/$$/g, "&#40;").replace(/$$/g, "&#41;")
+          line = line.replace(/\[([^\]]*$[^)]*$[^\]]*)\]/g, (match) => {
+            return match.replace(/$/g, "&#40;").replace(/$/g, "&#41;")
           })
 
           // Ensure proper spacing around arrows
@@ -204,8 +210,11 @@ export default function ComponentDiagram() {
       }
     } else {
       // If there are no lines, return a basic flowchart
-      result = "flowchart TD\n  A[Start] --> B[End]\n"
+      result = "graph TD\n  A[Start] --> B[End]\n"
     }
+
+    // Final check for any remaining "endsubgraph" issues
+    result = result.replace(/endsubgraph/g, "end\nsubgraph")
 
     return result
   }
@@ -239,7 +248,6 @@ export default function ComponentDiagram() {
       const extractedDiagram = extractDiagramFromSpecification(specData)
 
       if (extractedDiagram) {
-        // Format the extracted diagram to ensure it's valid
         const formattedDiagram = formatDiagram(extractedDiagram)
         setDiagramCode(formattedDiagram)
         toast({
@@ -249,7 +257,6 @@ export default function ComponentDiagram() {
       } else {
         // Generate a component diagram based on the specification data using AI
         const generatedDiagram = await generateDiagramWithAI(specData)
-        // Format the generated diagram to ensure it's valid
         const formattedDiagram = formatDiagram(generatedDiagram)
         setDiagramCode(formattedDiagram)
         toast({
@@ -346,14 +353,15 @@ Use subgraphs to group related components.
 IMPORTANT FORMATTING RULES:
 1. Start with "flowchart TD" on its own line
 2. Put each subgraph declaration on its own line
-3. Put quotes around subgraph names that contain spaces
-4. Put quotes around node text that contains spaces or special characters
+3. Enclose subgraph names in quotes, especially if they contain spaces or special characters
+4. Enclose node text in quotes if it contains spaces or special characters
 5. Put each node and connection on its own line
-6. End each subgraph with "end" on its own line
+6. End each subgraph with "end" on its own line - MAKE SURE "end" IS ON ITS OWN LINE
 7. Use proper spacing around arrows (e.g., "A --> B" not "A-->B")
 8. Put comments on their own lines, not at the end of other lines
+9. NEVER use "endsubgraph" - always use "end" on its own line
+10. For multiple connections, use separate lines (e.g., "A --> B" and "B --> C" not "A --> B --> C")
 
-Show the flow of data and interactions between components with arrows.
 Do not include any explanatory text, only the Mermaid diagram code.
 `
 
@@ -402,6 +410,9 @@ Do not include any explanatory text, only the Mermaid diagram code.
         return generateDefaultDiagram(specData)
       }
 
+      // Fix any "endsubgraph" issues before returning
+      diagramCode = diagramCode.replace(/endsubgraph/g, "end\nsubgraph")
+
       return diagramCode
     } catch (error) {
       console.error("Error generating diagram with AI:", error)
@@ -410,71 +421,6 @@ Do not include any explanatory text, only the Mermaid diagram code.
     }
   }
 
-  // Function to generate a default component diagram based on the app type
-  const generateDefaultDiagram = (specData) => {
-    const appName = specData.app_name || "Application"
-    const appType = specData.app_type || "web"
-    console.log(`Generating component diagram for ${appType} application: ${appName}`)
-
-    let generatedDiagram = `flowchart TD\n`
-
-    // Add frontend components based on app type
-    generatedDiagram += `subgraph "Frontend"\n`
-
-    if (appType === "ecommerce") {
-      generatedDiagram += `  UI["User Interface"]\n  ProductList["Product Listing"]\n  ProductDetail["Product Detail"]\n  Cart["Shopping Cart"]\n  Checkout["Checkout Process"]\n  UserProfile["User Profile"]\n`
-    } else if (appType === "crm") {
-      generatedDiagram += `  UI["User Interface"]\n  Dashboard["Dashboard"]\n  ContactList["Contact Management"]\n  LeadList["Lead Management"]\n  Calendar["Calendar"]\n  Reports["Reports"]\n`
-    } else if (appType === "mobile") {
-      generatedDiagram += `  UI["Mobile UI"]\n  Navigation["Navigation"]\n  Screens["App Screens"]\n  StateManager["State Management"]\n  LocalStorage["Local Storage"]\n  Notifications["Push Notifications"]\n`
-    } else {
-      generatedDiagram += `  UI["User Interface"]\n  Auth["Authentication UI"]\n  Dashboard["Dashboard"]\n  Forms["Form Components"]\n  UserProfile["User Profile"]\n`
-    }
-
-    generatedDiagram += `end\n\n`
-
-    // Add backend components
-    generatedDiagram += `subgraph "Backend"\n`
-
-    if (appType === "ecommerce") {
-      generatedDiagram += `  API["API Gateway"]\n  ProductService["Product Service"]\n  CartService["Cart Service"]\n  OrderService["Order Service"]\n  PaymentService["Payment Service"]\n  UserService["User Service"]\n  DB["Database"]\n`
-    } else if (appType === "crm") {
-      generatedDiagram += `  API["API Gateway"]\n  ContactService["Contact Service"]\n  LeadService["Lead Service"]\n  CalendarService["Calendar Service"]\n  ReportService["Report Service"]\n  UserService["User Service"]\n  DB["Database"]\n`
-    } else if (appType === "mobile") {
-      generatedDiagram += `  API["API Gateway"]\n  AuthService["Auth Service"]\n  DataService["Data Service"]\n  SyncService["Sync Service"]\n  NotificationService["Notification Service"]\n  DB["Database"]\n`
-    } else {
-      generatedDiagram += `  API["API Gateway"]\n  AuthService["Auth Service"]\n  ContentService["Content Service"]\n  UserService["User Service"]\n  NotificationService["Notification Service"]\n  DB["Database"]\n`
-    }
-
-    generatedDiagram += `end\n\n`
-
-    // Add connections between components
-    if (appType === "ecommerce") {
-      generatedDiagram += `UI --> ProductList\nUI --> ProductDetail\nUI --> Cart\nUI --> Checkout\nUI --> UserProfile\n\n`
-      generatedDiagram += `ProductList --> API\nProductDetail --> API\nCart --> API\nCheckout --> API\nUserProfile --> API\n\n`
-      generatedDiagram += `API --> ProductService\nAPI --> CartService\nAPI --> OrderService\nAPI --> PaymentService\nAPI --> UserService\n\n`
-      generatedDiagram += `ProductService --> DB\nCartService --> DB\nOrderService --> DB\nPaymentService --> DB\nUserService --> DB\n`
-    } else if (appType === "crm") {
-      generatedDiagram += `UI --> Dashboard\nUI --> ContactList\nUI --> LeadList\nUI --> Calendar\nUI --> Reports\n\n`
-      generatedDiagram += `Dashboard --> API\nContactList --> API\nLeadList --> API\nCalendar --> API\nReports --> API\n\n`
-      generatedDiagram += `API --> ContactService\nAPI --> LeadService\nAPI --> CalendarService\nAPI --> ReportService\nAPI --> UserService\n\n`
-      generatedDiagram += `ContactService --> DB\nLeadService --> DB\nCalendarService --> DB\nReportService --> DB\nUserService --> DB\n`
-    } else if (appType === "mobile") {
-      generatedDiagram += `UI --> Navigation\nNavigation --> Screens\nScreens --> StateManager\nStateManager --> LocalStorage\nStateManager --> API\n\n`
-      generatedDiagram += `API --> AuthService\nAPI --> DataService\nAPI --> SyncService\nAPI --> NotificationService\n\n`
-      generatedDiagram += `AuthService --> DB\nDataService --> DB\nSyncService --> DB\nNotificationService --> DB\n`
-    } else {
-      generatedDiagram += `UI --> Auth\nUI --> Dashboard\nUI --> Forms\nUI --> UserProfile\n\n`
-      generatedDiagram += `Auth --> API\nDashboard --> API\nForms --> API\nUserProfile --> API\n\n`
-      generatedDiagram += `API --> AuthService\nAPI --> ContentService\nAPI --> UserService\nAPI --> NotificationService\n\n`
-      generatedDiagram += `AuthService --> DB\nContentService --> DB\nUserService --> DB\nNotificationService --> DB\n`
-    }
-
-    console.log("Generated component diagram successfully")
-    return generatedDiagram
-  }
-
-  // Update the handleSave function to work with specifications
   const handleSave = async () => {
     if (!specificationId) {
       toast({
@@ -499,7 +445,7 @@ Do not include any explanatory text, only the Mermaid diagram code.
         throw new Error(requirementResult.error || "Failed to create requirement")
       }
 
-      // Now save the design with the requirement ID using the server action
+      // Now save the design using the server action
       const result = await saveComponentDiagram({
         type: "component",
         diagramCode,
@@ -654,11 +600,6 @@ Do not include any explanatory text, only the Mermaid diagram code.
                     No diagram to preview. Generate or enter a diagram.
                   </div>
                 )}
-                {previewError && (
-                  <div className="mt-2 p-2 text-sm text-red-500 bg-red-50 border border-red-200 rounded">
-                    Error: {previewError}
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -668,33 +609,88 @@ Do not include any explanatory text, only the Mermaid diagram code.
   )
 }
 
-// Update the generateDefaultDiagram function to ensure proper line breaks between subgraphs
+// Update the generateDefaultDiagram function to ensure proper formatting
+const generateDefaultDiagram = (specData) => {
+  const appName = specData.app_name || "Application"
+  const appType = specData.app_type || "web"
+  console.log(`Generating component diagram for ${appType} application: ${appName}`)
 
-function generateDefaultDiagram(appType: string): string {
-  switch (appType.toLowerCase()) {
-    case "web application":
-      return `graph TD
-    subgraph "Frontend"
-      UI["User Interface"]
-      Components["React Components"]
-      State["State Management"]
-    end
+  let generatedDiagram = `flowchart TD\n`
 
-    subgraph "Backend"
-      API["RESTful API"]
-      Logic["Backend Logic"]
-    end
+  // Add frontend components based on app type
+  generatedDiagram += `  subgraph "Frontend"\n`
 
-    subgraph "Database"
-      DB["Database"]
-    end
-
-    UI --> Components
-    Components --> State
-    State --> API
-    API --> Logic
-    Logic --> DB`
-
-    // Other cases remain the same...
+  if (appType === "ecommerce") {
+    generatedDiagram += `    UI["User Interface"]\n    ProductList["Product Listing"]\n    ProductDetail["Product Detail"]\n    Cart["Shopping Cart"]\n    Checkout["Checkout Process"]\n    UserProfile["User Profile"]\n`
+  } else if (appType === "crm") {
+    generatedDiagram += `    UI["User Interface"]\n    Dashboard["Dashboard"]\n    ContactList["Contact Management"]\n    LeadList["Lead Management"]\n    Calendar["Calendar"]\n    Reports["Reports"]\n`
+  } else if (appType === "mobile") {
+    generatedDiagram += `    UI["Mobile UI"]\n    Navigation["Navigation"]\n    Screens["App Screens"]\n    StateManager["State Management"]\n    LocalStorage["Local Storage"]\n    Notifications["Push Notifications"]\n`
+  } else {
+    generatedDiagram += `    UI["User Interface"]\n    Auth["Authentication UI"]\n    Dashboard["Dashboard"]\n    Forms["Form Components"]\n    UserProfile["User Profile"]\n`
   }
+
+  generatedDiagram += `  end\n\n`
+
+  // Add backend components
+  generatedDiagram += `  subgraph "Backend"\n`
+
+  if (appType === "ecommerce") {
+    generatedDiagram += `    API["API Gateway"]\n    ProductService["Product Service"]\n    CartService["Cart Service"]\n    OrderService["Order Service"]\n    PaymentService["Payment Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
+  } else if (appType === "crm") {
+    generatedDiagram += `    API["API Gateway"]\n    ContactService["Contact Service"]\n    LeadService["Lead Service"]\n    CalendarService["Calendar Service"]\n    ReportService["Report Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
+  } else if (appType === "mobile") {
+    generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    DataService["Data Service"]\n    SyncService["Sync Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
+  } else {
+    generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    ContentService["Content Service"]\n    UserService["User Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
+  }
+
+  generatedDiagram += `  end\n\n`
+
+  // Add connections between components
+  if (appType === "ecommerce") {
+    generatedDiagram += `  UI --> ProductList\n  UI --> ProductDetail\n  UI --> Cart\n  UI --> Checkout\n  UI --> UserProfile\n\n`
+    generatedDiagram += `  ProductList --> API\n  ProductDetail --> API\n  Cart --> API\n  Checkout --> API\n  UserProfile --> API\n\n`
+    generatedDiagram += `  API --> ProductService\n  API --> CartService\n  API --> OrderService\n  API --> PaymentService\n  UserService --> DB\n\n`
+    generatedDiagram += `  ProductService --> DB\n  CartService --> DB\n  OrderService --> DB\n  PaymentService --> DB\n  UserService --> DB\n`
+  } else if (appType === "crm") {
+    generatedDiagram += `  UI --> Dashboard\n  UI --> ContactList\n  UI --> LeadList\n  UI --> Calendar\n  UI --> Reports\n\n`
+    generatedDiagram += `  Dashboard --> API\n  ContactList --> API\n  LeadList --> API\n  Calendar --> API\n  Reports --> API\n\n`
+    generatedDiagram += `  API --> ContactService\n  API --> LeadService\n  API --> CalendarService\n  ReportService --> API\n  UserService --> DB\n\n`
+    generatedDiagram += `  ContactService --> DB\n  LeadService --> DB\n  CalendarService --> DB\n  ReportService --> DB\n  UserService --> DB\n`
+  } else if (appType === "mobile") {
+    generatedDiagram += `  UI --> Navigation\n  Navigation --> Screens\n  Screens --> StateManager\n  StateManager --> LocalStorage\n  StateManager --> API\n\n`
+    generatedDiagram += `  API --> AuthService\n  API --> DataService\n  API --> SyncService\n  API --> NotificationService\n\n`
+    generatedDiagram += `  AuthService --> DB\n  DataService --> DB\n  SyncService --> DB\n  NotificationService --> DB\n`
+  } else {
+    generatedDiagram += `  UI --> Auth\n  UI --> Dashboard\n  UI --> Forms\n  UserProfile --> API\n\n`
+    generatedDiagram += `  Auth --> API\n  Dashboard --> API\n  Forms --> API\n  UserProfile --> API\n\n`
+    generatedDiagram += `  API --> AuthService\n  API --> ContentService\n  API --> UserService\n  API --> NotificationService\n\n`
+    generatedDiagram += `  AuthService --> DB\n  ContentService --> DB\n  UserService --> DB\n  NotificationService --> DB\n`
+  }
+
+  console.log("Generated component diagram successfully")
+  return generatedDiagram
+}
+
+function formatDiagram(diagramCode) {
+  // Trim leading/trailing whitespace
+  diagramCode = diagramCode.trim()
+
+  // Ensure the diagram starts with "graph LR" or "graph TD"
+  if (
+    !diagramCode.startsWith("graph LR") &&
+    !diagramCode.startsWith("graph TD") &&
+    !diagramCode.startsWith("flowchart TD")
+  ) {
+    diagramCode = "flowchart TD\n" + diagramCode
+  }
+
+  // Add a newline after each subgraph and connection
+  diagramCode = diagramCode.replace(/(subgraph|-->)/g, "$1\n")
+
+  // Remove extra newlines
+  diagramCode = diagramCode.replace(/\n+/g, "\n")
+
+  return diagramCode
 }
