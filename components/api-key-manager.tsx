@@ -13,7 +13,10 @@ export function ApiKeyManager() {
   const { toast } = useToast()
   const [apiKey, setApiKey] = useState("")
   const [isTesting, setIsTesting] = useState(false)
-  const [isValid, setIsValid] = useState(false)
+  const [statusMessage, setStatusMessage] = useState<{ text: string; type: "success" | "info" | "error" | null }>({
+    text: "",
+    type: null,
+  })
 
   useEffect(() => {
     // Load API key from localStorage on mount
@@ -25,21 +28,24 @@ export function ApiKeyManager() {
 
   const handleApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setApiKey(e.target.value)
-    setIsValid(false) // Reset validation status on change
+    setStatusMessage({ text: "", type: null }) // Reset status message on change
   }
 
   const handleSaveApiKey = () => {
     localStorage.setItem("openai_api_key", apiKey)
+    setStatusMessage({
+      text: "API key successfully saved to local storage!",
+      type: "success",
+    })
     toast({
       title: "API key saved",
       description: "Your OpenAI API key has been saved successfully.",
     })
-    setIsValid(false) // Reset validation status on save
   }
 
   const handleTestApiKey = async () => {
     setIsTesting(true)
-    setIsValid(false)
+    setStatusMessage({ text: "", type: null })
     try {
       // Make sure apiKey is not empty before testing
       if (!apiKey || apiKey.trim() === "") {
@@ -47,6 +53,10 @@ export function ApiKeyManager() {
           title: "API key is empty",
           description: "Please enter an API key before testing",
           variant: "destructive",
+        })
+        setStatusMessage({
+          text: "API key cannot be empty",
+          type: "error",
         })
         setIsTesting(false)
         return
@@ -56,12 +66,21 @@ export function ApiKeyManager() {
       const data = await response.json()
 
       if (data.success) {
-        setIsValid(true)
+        // Automatically save the API key when it's valid
+        localStorage.setItem("openai_api_key", apiKey)
+        setStatusMessage({
+          text: "API key is valid and has been saved!",
+          type: "success",
+        })
         toast({
-          title: "API key is valid",
-          description: data.response,
+          title: "API key is valid and saved",
+          description: "Your API key has been tested successfully and saved to local storage.",
         })
       } else {
+        setStatusMessage({
+          text: "API key is invalid: " + data.error,
+          type: "error",
+        })
         toast({
           title: "API key is invalid",
           description: data.error,
@@ -70,6 +89,10 @@ export function ApiKeyManager() {
       }
     } catch (error) {
       console.error("Error testing API key:", error)
+      setStatusMessage({
+        text: "Error testing API key: " + (error instanceof Error ? error.message : "An unexpected error occurred"),
+        type: "error",
+      })
       toast({
         title: "Error testing API key",
         description: error instanceof Error ? error.message : "An unexpected error occurred",
@@ -113,7 +136,19 @@ export function ApiKeyManager() {
         </Button>
       </div>
 
-      {isValid && <div className="text-green-500">API key is valid!</div>}
+      {statusMessage.type && (
+        <div
+          className={`mt-2 ${
+            statusMessage.type === "success"
+              ? "text-green-500"
+              : statusMessage.type === "error"
+                ? "text-red-500"
+                : "text-blue-500"
+          }`}
+        >
+          {statusMessage.text}
+        </div>
+      )}
     </div>
   )
 }

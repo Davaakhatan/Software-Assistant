@@ -64,6 +64,7 @@
     "uuid": "latest",
     "@ai-sdk/openai": "latest",
     "openai": "latest",
+    "@supabase/auth-helpers-nextjs": "latest",
     "mermaid": "latest"
   },
   "devDependencies": {

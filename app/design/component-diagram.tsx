@@ -6,55 +6,59 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
-import { Save, Wand2 } from "lucide-react"
+import { Save, Wand2, Copy, Check, RefreshCw, AlertTriangle, Info } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { saveDesign } from "./actions"
 import MermaidDiagram from "@/components/mermaid-diagram"
-// Import the getSpecifications function from the specification-generator actions
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
-// Import the client-side supabase instance
-import { getSupabase } from "@/lib/supabase"
+import { createRequirementForSpecification, saveComponentDiagram } from "./component-diagram-actions"
 
 export default function ComponentDiagram() {
   const { toast } = useToast()
   const [diagramCode, setDiagramCode] = useState(`flowchart TD
-   subgraph Frontend
-     UI[User Interface]
-     Auth[Auth Component]
-     Forms[Form Components]
-     Dashboard[Dashboard Component]
-   end
-   
-   subgraph Backend
-     API[API Layer]
-     Services[Service Layer]
-     DB[Data Access Layer]
-   end
-   
-   UI --> Auth
-   UI --> Forms
-   UI --> Dashboard
-   
-   Auth --> API
-   Forms --> API
-   Dashboard --> API
-   
-   API --> Services
-   Services --> DB`)
+  subgraph "Frontend"
+    UI["User Interface"]
+    Auth["Auth Component"]
+    Forms["Form Components"]
+    Dashboard["Dashboard Component"]
+  end
+  
+  subgraph "Backend"
+    API["API Layer"]
+    Services["Service Layer"]
+    DB["Data Access Layer"]
+  end
+  
+  UI --> Auth
+  UI --> Forms
+  UI --> Dashboard
+  
+  Auth --> API
+  Forms --> API
+  Dashboard --> API
+  
+  API --> Services
+  Services --> DB`)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [specificationId, setSpecificationId] = useState("")
   const [specifications, setSpecifications] = useState([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isCopied, setIsCopied] = useState(false)
+  const [selectedSpecification, setSelectedSpecification] = useState(null)
+  const [previewError, setPreviewError] = useState(null)
+  const [fetchError, setFetchError] = useState(null)
+  const [authWarning, setAuthWarning] = useState(false)
 
-  // Update to fetch specifications instead of requirements
+  // Update to fetch specifications on component mount
   useEffect(() => {
     const fetchSpecifications = async () => {
       try {
+        setFetchError(null)
         const result = await getSpecifications()
         if (result.success) {
           setSpecifications(result.data)
         } else {
+          setFetchError(result.error || "Failed to load specifications")
           toast({
             title: "Error",
             description: "Failed to load specifications",
@@ -63,6 +67,7 @@ export default function ComponentDiagram() {
         }
       } catch (error) {
         console.error("Error fetching specifications:", error)
+        setFetchError(error.message || "Failed to load specifications")
         toast({
           title: "Error",
           description: "Failed to load specifications",
@@ -76,7 +81,136 @@ export default function ComponentDiagram() {
     fetchSpecifications()
   }, [toast])
 
-  // Add a function to generate component diagram from specification
+  const handleSpecificationChange = async (id) => {
+    setSpecificationId(id)
+
+    if (id) {
+      try {
+        const result = await getSpecificationById(id)
+        if (result.success) {
+          setSelectedSpecification(result.data)
+        }
+      } catch (error) {
+        console.error("Error fetching specification details:", error)
+      }
+    } else {
+      setSelectedSpecification(null)
+    }
+  }
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(diagramCode)
+    setIsCopied(true)
+    setTimeout(() => setIsCopied(false), 2000)
+    toast({
+      title: "Copied!",
+      description: "Diagram code copied to clipboard",
+    })
+  }
+
+  // Function to format a diagram with proper line breaks and spacing
+  const formatDiagram = (code) => {
+    if (!code) return ""
+
+    // First, normalize line breaks to ensure consistent processing
+    const formatted = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+
+    // Split into lines and process each line
+    const lines = formatted
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+
+    // Start with an empty diagram
+    let result = ""
+
+    // Process the first line (graph/flowchart declaration)
+    if (lines.length > 0) {
+      const firstLine = lines[0]
+
+      // Extract the graph type (graph LR, graph TD, flowchart TD, etc.)
+      if (firstLine.startsWith("graph") || firstLine.startsWith("flowchart")) {
+        // Extract the graph type and direction
+        const match = firstLine.match(/(graph|flowchart)\s*([A-Z]{2})/)
+        if (match) {
+          const [, type, direction] = match
+          result = `${type} ${direction}\n`
+        } else {
+          // If we can't parse it, just use the first line as is
+          result = `${firstLine}\n`
+        }
+      } else {
+        // If the first line doesn't start with graph or flowchart, assume it's flowchart TD
+        result = `flowchart TD\n${firstLine}\n`
+      }
+
+      // Process the remaining lines
+      for (let i = 1; i < lines.length; i++) {
+        let line = lines[i].trim()
+
+        // Handle comments - ensure they're on their own line
+        if (line.includes("%%")) {
+          const parts = line.split("%%")
+          if (parts[0].trim()) {
+            result += `${parts[0].trim()}\n`
+          }
+          if (parts[1].trim()) {
+            result += `%% ${parts[1].trim()}\n`
+          }
+          continue
+        }
+
+        // Handle subgraph declarations
+        if (line.startsWith("subgraph")) {
+          // Extract the subgraph title
+          const titleMatch = line.match(/subgraph\s+(.+)/)
+          if (titleMatch) {
+            const title = titleMatch[1]
+            // If the title is not already quoted and contains spaces, quote it
+            if (title.includes(" ") && !title.startsWith('"') && !title.endsWith('"')) {
+              result += `subgraph "${title}"\n`
+            } else {
+              result += `subgraph ${title}\n`
+            }
+          } else {
+            result += `${line}\n`
+          }
+        }
+        // Handle end statements
+        else if (line === "end") {
+          result += `end\n`
+        }
+        // Handle node definitions and connections
+        else {
+          // Fix node text with spaces
+          line = line.replace(/\[([^\]]*)\]/g, (match, p1) => {
+            if (/[\s$[\]/\\:;,]/.test(p1) && !p1.includes('"')) {
+              return `["${p1}"]`
+            }
+            return match
+          })
+
+          // Fix parentheses in node text
+          line = line.replace(/\[([^\]]*$$[^)]*$$[^\]]*)\]/g, (match) => {
+            return match.replace(/$$/g, "&#40;").replace(/$$/g, "&#41;")
+          })
+
+          // Ensure proper spacing around arrows
+          line = line.replace(/([A-Za-z0-9_")])(\s*)-->/g, "$1 -->")
+          line = line.replace(/-->(\s*)([A-Za-z0-9_"(])/g, "--> $2")
+
+          result += `${line}\n`
+        }
+      }
+    } else {
+      // If there are no lines, return a basic flowchart
+      result = "flowchart TD\n  A[Start] --> B[End]\n"
+    }
+
+    return result
+  }
+
+  // Add a function to generate component diagram from specification using AI
   const generateComponentDiagram = async () => {
     if (!specificationId) {
       toast({
@@ -88,6 +222,7 @@ export default function ComponentDiagram() {
     }
 
     setIsGenerating(true)
+    setPreviewError(null)
     try {
       // Get the specification details
       console.log("Fetching specification with ID:", specificationId)
@@ -100,67 +235,31 @@ export default function ComponentDiagram() {
       const specData = result.data
       console.log("Specification data received:", specData ? "yes" : "no")
 
-      // Generate a component diagram based on the specification data
-      let generatedDiagram = `flowchart TD\n`
+      // First try to extract a component diagram from the specification if it exists
+      const extractedDiagram = extractDiagramFromSpecification(specData)
 
-      // Extract app name and type from specification
-      const appName = specData.app_name || "Application"
-      const appType = specData.app_type || "web"
-      console.log(`Generating component diagram for ${appType} application: ${appName}`)
-
-      // Add frontend components based on app type
-      generatedDiagram += `subgraph "Frontend"\n`
-
-      if (appType === "ecommerce") {
-        generatedDiagram += `  UI[User Interface]\n  ProductList[Product Listing]\n  ProductDetail[Product Detail]\n  Cart[Shopping Cart]\n  Checkout[Checkout Process]\n  UserProfile[User Profile]\n`
-      } else if (appType === "crm") {
-        generatedDiagram += `  UI[User Interface]\n  Dashboard[Dashboard]\n  ContactList[Contact Management]\n  LeadList[Lead Management]\n  Calendar[Calendar]\n  Reports[Reports]\n`
+      if (extractedDiagram) {
+        // Format the extracted diagram to ensure it's valid
+        const formattedDiagram = formatDiagram(extractedDiagram)
+        setDiagramCode(formattedDiagram)
+        toast({
+          title: "Component diagram extracted",
+          description: "Component diagram was extracted from the specification",
+        })
       } else {
-        generatedDiagram += `  UI[User Interface]\n  Auth[Authentication UI]\n  Dashboard[Dashboard]\n  Forms[Form Components]\n  UserProfile[User Profile]\n`
+        // Generate a component diagram based on the specification data using AI
+        const generatedDiagram = await generateDiagramWithAI(specData)
+        // Format the generated diagram to ensure it's valid
+        const formattedDiagram = formatDiagram(generatedDiagram)
+        setDiagramCode(formattedDiagram)
+        toast({
+          title: "Component diagram generated",
+          description: "Component diagram has been generated based on the selected specification",
+        })
       }
-
-      generatedDiagram += `end\n\n`
-
-      // Add backend components
-      generatedDiagram += `subgraph "Backend"\n`
-
-      if (appType === "ecommerce") {
-        generatedDiagram += `  API[API Gateway]\n  ProductService[Product Service]\n  CartService[Cart Service]\n  OrderService[Order Service]\n  PaymentService[Payment Service]\n  UserService[User Service]\n  DB[(Database)]\n`
-      } else if (appType === "crm") {
-        generatedDiagram += `  API[API Gateway]\n  ContactService[Contact Service]\n  LeadService[Lead Service]\n  CalendarService[Calendar Service]\n  ReportService[Report Service]\n  UserService[User Service]\n  DB[(Database)]\n`
-      } else {
-        generatedDiagram += `  API[API Gateway]\n  AuthService[Auth Service]\n  ContentService[Content Service]\n  UserService[User Service]\n  NotificationService[Notification Service]\n  DB[(Database)]\n`
-      }
-
-      generatedDiagram += `end\n\n`
-
-      // Add connections between components
-      if (appType === "ecommerce") {
-        generatedDiagram += `UI --> ProductList\nUI --> ProductDetail\nUI --> Cart\nUI --> Checkout\nUI --> UserProfile\n\n`
-        generatedDiagram += `ProductList --> API\nProductDetail --> API\nCart --> API\nCheckout --> API\nUserProfile --> API\n\n`
-        generatedDiagram += `API --> ProductService\nAPI --> CartService\nAPI --> OrderService\nAPI --> PaymentService\nAPI --> UserService\n\n`
-        generatedDiagram += `ProductService --> DB\nCartService --> DB\nOrderService --> DB\nPaymentService --> DB\nUserService --> DB\n`
-      } else if (appType === "crm") {
-        generatedDiagram += `UI --> Dashboard\nUI --> ContactList\nUI --> LeadList\nUI --> Calendar\nUI --> Reports\n\n`
-        generatedDiagram += `Dashboard --> API\nContactList --> API\nLeadList --> API\nCalendar --> API\nReports --> API\n\n`
-        generatedDiagram += `API --> ContactService\nAPI --> LeadService\nAPI --> CalendarService\nAPI --> ReportService\nAPI --> UserService\n\n`
-        generatedDiagram += `ContactService --> DB\nLeadService --> DB\nCalendarService --> DB\nReportService --> DB\nUserService --> DB\n`
-      } else {
-        generatedDiagram += `UI --> Auth\nUI --> Dashboard\nUI --> Forms\nUI --> UserProfile\n\n`
-        generatedDiagram += `Auth --> API\nDashboard --> API\nForms --> API\nUserProfile --> API\n\n`
-        generatedDiagram += `API --> AuthService\nAPI --> ContentService\nAPI --> UserService\nAPI --> NotificationService\n\n`
-        generatedDiagram += `AuthService --> DB\nContentService --> DB\nUserService --> DB\nNotificationService --> DB\n`
-      }
-
-      console.log("Generated component diagram successfully")
-      setDiagramCode(generatedDiagram)
-
-      toast({
-        title: "Component diagram generated",
-        description: "Component diagram has been generated based on the selected specification.",
-      })
     } catch (error) {
       console.error("Error generating component diagram:", error)
+      setPreviewError(error.message)
       toast({
         title: "Error",
         description: error.message || "Failed to generate component diagram",
@@ -169,6 +268,210 @@ export default function ComponentDiagram() {
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  // Function to extract a diagram from the specification text
+  const extractDiagramFromSpecification = (specData) => {
+    // Look for mermaid diagram in system_architecture section that might contain component info
+    if (specData.system_architecture) {
+      // Try to find a mermaid diagram in the system_architecture field
+      const mermaidMatch = specData.system_architecture.match(/```mermaid\s*([\s\S]*?)\s*```/)
+      if (mermaidMatch && mermaidMatch[1]) {
+        const diagramContent = mermaidMatch[1].trim()
+        // Check if it's a flowchart or component diagram
+        if (
+          diagramContent.includes("flowchart") ||
+          diagramContent.includes("graph") ||
+          diagramContent.includes("subgraph")
+        ) {
+          return diagramContent
+        }
+      }
+
+      // Try to find a flowchart pattern without mermaid markers
+      const flowchartMatch = specData.system_architecture.match(/flowchart\s+[A-Z]+\s*([\s\S]*?)(?:\n\n|\n$|$)/)
+      if (flowchartMatch && flowchartMatch[0]) {
+        return flowchartMatch[0].trim()
+      }
+    }
+
+    // If no diagram found in system_architecture, try to find it in the entire specification
+    const allText = [
+      specData.app_description,
+      specData.functional_requirements,
+      specData.non_functional_requirements,
+      specData.system_architecture,
+      specData.database_schema,
+      specData.api_endpoints,
+      specData.user_stories,
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+
+    // Look for mermaid diagram in the entire text
+    const mermaidMatch = allText.match(/```mermaid\s*([\s\S]*?)\s*```/)
+    if (mermaidMatch && mermaidMatch[1]) {
+      // Check if it's a component diagram (contains flowchart or graph)
+      const diagramContent = mermaidMatch[1].trim()
+      if (
+        diagramContent.includes("flowchart") ||
+        diagramContent.includes("graph") ||
+        diagramContent.includes("subgraph")
+      ) {
+        return diagramContent
+      }
+    }
+
+    return null
+  }
+
+  // Function to generate a diagram with AI based on the specification
+  const generateDiagramWithAI = async (specData) => {
+    try {
+      // Prepare a prompt for the AI based on the specification
+      const prompt = `
+Generate a Mermaid diagram for the component interaction of the following application:
+
+App Name: ${specData.app_name || "Unknown"}
+App Type: ${specData.app_type || "web"}
+Description: ${specData.app_description || ""}
+
+${specData.system_architecture ? `System Architecture Description: ${specData.system_architecture}` : ""}
+${specData.functional_requirements ? `Functional Requirements: ${specData.functional_requirements}` : ""}
+
+Please generate a Mermaid diagram using the 'flowchart TD' syntax that shows the component interactions.
+Include frontend components, backend components, and how they interact with each other.
+Use subgraphs to group related components.
+
+IMPORTANT FORMATTING RULES:
+1. Start with "flowchart TD" on its own line
+2. Put each subgraph declaration on its own line
+3. Put quotes around subgraph names that contain spaces
+4. Put quotes around node text that contains spaces or special characters
+5. Put each node and connection on its own line
+6. End each subgraph with "end" on its own line
+7. Use proper spacing around arrows (e.g., "A --> B" not "A-->B")
+8. Put comments on their own lines, not at the end of other lines
+
+Show the flow of data and interactions between components with arrows.
+Do not include any explanatory text, only the Mermaid diagram code.
+`
+
+      // Make a request to the AI API
+      const response = await fetch("/api/generate-code", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          activeTab: "manual",
+          requirements: prompt,
+          language: "mermaid",
+          framework: "diagram",
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to generate diagram with AI")
+      }
+
+      const data = await response.json()
+
+      // Extract the Mermaid diagram from the response
+      let diagramCode = data.code
+
+      // Clean up the response to extract just the Mermaid diagram
+      const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(flowchart[\s\S]*?)```/)
+      if (mermaidMatch && mermaidMatch[1]) {
+        diagramCode = mermaidMatch[1].trim()
+      } else {
+        // If no mermaid code block found, look for flowchart or graph
+        const flowchartMatch = diagramCode.match(/(flowchart\s+(?:TD|LR)[\s\S]*?)(?:\n\n|\n$|$)/)
+        if (flowchartMatch && flowchartMatch[1]) {
+          diagramCode = flowchartMatch[1].trim()
+        } else {
+          const graphMatch = diagramCode.match(/(graph\s+(?:TD|LR)[\s\S]*?)(?:\n\n|\n$|$)/)
+          if (graphMatch && graphMatch[1]) {
+            diagramCode = graphMatch[1].trim()
+          }
+        }
+      }
+
+      // If we still don't have a valid diagram, generate a default one
+      if (!diagramCode.includes("flowchart") && !diagramCode.includes("graph")) {
+        return generateDefaultDiagram(specData)
+      }
+
+      return diagramCode
+    } catch (error) {
+      console.error("Error generating diagram with AI:", error)
+      // Fallback to a default diagram
+      return generateDefaultDiagram(specData)
+    }
+  }
+
+  // Function to generate a default component diagram based on the app type
+  const generateDefaultDiagram = (specData) => {
+    const appName = specData.app_name || "Application"
+    const appType = specData.app_type || "web"
+    console.log(`Generating component diagram for ${appType} application: ${appName}`)
+
+    let generatedDiagram = `flowchart TD\n`
+
+    // Add frontend components based on app type
+    generatedDiagram += `subgraph "Frontend"\n`
+
+    if (appType === "ecommerce") {
+      generatedDiagram += `  UI["User Interface"]\n  ProductList["Product Listing"]\n  ProductDetail["Product Detail"]\n  Cart["Shopping Cart"]\n  Checkout["Checkout Process"]\n  UserProfile["User Profile"]\n`
+    } else if (appType === "crm") {
+      generatedDiagram += `  UI["User Interface"]\n  Dashboard["Dashboard"]\n  ContactList["Contact Management"]\n  LeadList["Lead Management"]\n  Calendar["Calendar"]\n  Reports["Reports"]\n`
+    } else if (appType === "mobile") {
+      generatedDiagram += `  UI["Mobile UI"]\n  Navigation["Navigation"]\n  Screens["App Screens"]\n  StateManager["State Management"]\n  LocalStorage["Local Storage"]\n  Notifications["Push Notifications"]\n`
+    } else {
+      generatedDiagram += `  UI["User Interface"]\n  Auth["Authentication UI"]\n  Dashboard["Dashboard"]\n  Forms["Form Components"]\n  UserProfile["User Profile"]\n`
+    }
+
+    generatedDiagram += `end\n\n`
+
+    // Add backend components
+    generatedDiagram += `subgraph "Backend"\n`
+
+    if (appType === "ecommerce") {
+      generatedDiagram += `  API["API Gateway"]\n  ProductService["Product Service"]\n  CartService["Cart Service"]\n  OrderService["Order Service"]\n  PaymentService["Payment Service"]\n  UserService["User Service"]\n  DB["Database"]\n`
+    } else if (appType === "crm") {
+      generatedDiagram += `  API["API Gateway"]\n  ContactService["Contact Service"]\n  LeadService["Lead Service"]\n  CalendarService["Calendar Service"]\n  ReportService["Report Service"]\n  UserService["User Service"]\n  DB["Database"]\n`
+    } else if (appType === "mobile") {
+      generatedDiagram += `  API["API Gateway"]\n  AuthService["Auth Service"]\n  DataService["Data Service"]\n  SyncService["Sync Service"]\n  NotificationService["Notification Service"]\n  DB["Database"]\n`
+    } else {
+      generatedDiagram += `  API["API Gateway"]\n  AuthService["Auth Service"]\n  ContentService["Content Service"]\n  UserService["User Service"]\n  NotificationService["Notification Service"]\n  DB["Database"]\n`
+    }
+
+    generatedDiagram += `end\n\n`
+
+    // Add connections between components
+    if (appType === "ecommerce") {
+      generatedDiagram += `UI --> ProductList\nUI --> ProductDetail\nUI --> Cart\nUI --> Checkout\nUI --> UserProfile\n\n`
+      generatedDiagram += `ProductList --> API\nProductDetail --> API\nCart --> API\nCheckout --> API\nUserProfile --> API\n\n`
+      generatedDiagram += `API --> ProductService\nAPI --> CartService\nAPI --> OrderService\nAPI --> PaymentService\nAPI --> UserService\n\n`
+      generatedDiagram += `ProductService --> DB\nCartService --> DB\nOrderService --> DB\nPaymentService --> DB\nUserService --> DB\n`
+    } else if (appType === "crm") {
+      generatedDiagram += `UI --> Dashboard\nUI --> ContactList\nUI --> LeadList\nUI --> Calendar\nUI --> Reports\n\n`
+      generatedDiagram += `Dashboard --> API\nContactList --> API\nLeadList --> API\nCalendar --> API\nReports --> API\n\n`
+      generatedDiagram += `API --> ContactService\nAPI --> LeadService\nAPI --> CalendarService\nAPI --> ReportService\nAPI --> UserService\n\n`
+      generatedDiagram += `ContactService --> DB\nLeadService --> DB\nCalendarService --> DB\nReportService --> DB\nUserService --> DB\n`
+    } else if (appType === "mobile") {
+      generatedDiagram += `UI --> Navigation\nNavigation --> Screens\nScreens --> StateManager\nStateManager --> LocalStorage\nStateManager --> API\n\n`
+      generatedDiagram += `API --> AuthService\nAPI --> DataService\nAPI --> SyncService\nAPI --> NotificationService\n\n`
+      generatedDiagram += `AuthService --> DB\nDataService --> DB\nSyncService --> DB\nNotificationService --> DB\n`
+    } else {
+      generatedDiagram += `UI --> Auth\nUI --> Dashboard\nUI --> Forms\nUI --> UserProfile\n\n`
+      generatedDiagram += `Auth --> API\nDashboard --> API\nForms --> API\nUserProfile --> API\n\n`
+      generatedDiagram += `API --> AuthService\nAPI --> ContentService\nAPI --> UserService\nAPI --> NotificationService\n\n`
+      generatedDiagram += `AuthService --> DB\nContentService --> DB\nUserService --> DB\nNotificationService --> DB\n`
+    }
+
+    console.log("Generated component diagram successfully")
+    return generatedDiagram
   }
 
   // Update the handleSave function to work with specifications
@@ -183,50 +486,24 @@ export default function ComponentDiagram() {
     }
 
     setIsSubmitting(true)
+    setAuthWarning(false)
     try {
       // Find the specification to get its name for the project
       const spec = specifications.find((s) => s.id === specificationId)
       const projectName = spec ? spec.app_name : "Unknown Project"
 
-      // Create a temporary requirement ID linked to this specification
-      // This is needed because the current saveDesign function expects a requirementId
-      const supabase = getSupabase()
+      // Use the server action to create a requirement
+      const requirementResult = await createRequirementForSpecification(specificationId, projectName)
 
-      // Check if a requirement already exists for this specification
-      const { data: existingReq, error: existingReqError } = await supabase
-        .from("requirements")
-        .select("id")
-        .eq("specification_id", specificationId)
-        .maybeSingle()
-
-      let requirementId = null
-
-      if (!existingReqError && existingReq) {
-        // Use existing requirement
-        requirementId = existingReq.id
-      } else {
-        // Create a new requirement linked to this specification
-        const { data: newReq, error: newReqError } = await supabase
-          .from("requirements")
-          .insert({
-            project_name: projectName,
-            project_description: `Auto-generated from specification: ${projectName}`,
-            specification_id: specificationId,
-          })
-          .select()
-
-        if (newReqError) {
-          throw new Error(`Failed to create requirement: ${newReqError.message}`)
-        }
-
-        requirementId = newReq[0].id
+      if (!requirementResult.success) {
+        throw new Error(requirementResult.error || "Failed to create requirement")
       }
 
-      // Now save the design with the requirement ID
-      const result = await saveDesign({
+      // Now save the design with the requirement ID using the server action
+      const result = await saveComponentDiagram({
         type: "component",
         diagramCode,
-        requirementId,
+        requirementId: requirementResult.requirementId,
       })
 
       if (result.success) {
@@ -235,15 +512,35 @@ export default function ComponentDiagram() {
           description: "Your component diagram has been saved successfully.",
         })
       } else {
-        throw new Error(result.error || "Failed to save component diagram")
+        if (result.error && result.error.includes("not authenticated")) {
+          setAuthWarning(true)
+          toast({
+            title: "Authentication Notice",
+            description: "Using development mode for saving. In production, authentication would be required.",
+            variant: "default",
+          })
+        } else {
+          throw new Error(result.error || "Failed to save component diagram")
+        }
       }
     } catch (error) {
       console.error("Error saving component diagram:", error)
-      toast({
-        title: "Error",
-        description: error.message || "Failed to save component diagram.",
-        variant: "destructive",
-      })
+
+      // Check if it's an authentication error
+      if (error.message && error.message.includes("not authenticated")) {
+        setAuthWarning(true)
+        toast({
+          title: "Authentication Notice",
+          description: "Using development mode for saving. In production, authentication would be required.",
+          variant: "default",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to save component diagram.",
+          variant: "destructive",
+        })
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -256,13 +553,40 @@ export default function ComponentDiagram() {
           <div className="mb-4">
             <h2 className="text-xl font-semibold mb-2">Component Interaction Diagram</h2>
             <p className="text-sm text-muted-foreground mb-4">
-              Use Mermaid flowchart syntax to define how your components interact with each other.
+              Use Mermaid flowchart syntax to define how your components interact with each other. Select a
+              specification and generate a diagram or create your own.
             </p>
           </div>
 
+          {fetchError && (
+            <div className="mb-4 p-4 border border-red-200 bg-red-50 rounded-md flex items-center gap-2 text-red-700">
+              <AlertTriangle className="h-5 w-5" />
+              <div>
+                <p className="font-medium">Error loading specifications</p>
+                <p className="text-sm">{fetchError}</p>
+                <p className="text-sm mt-1">
+                  Please check your Supabase connection and make sure your environment variables are set correctly.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {authWarning && (
+            <div className="mb-4 p-4 border border-amber-200 bg-amber-50 rounded-md flex items-center gap-2 text-amber-700">
+              <Info className="h-5 w-5" />
+              <div>
+                <p className="font-medium">Development Mode</p>
+                <p className="text-sm">
+                  You are not currently authenticated. In development mode, diagrams will be saved with a default user
+                  ID.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="mb-4">
             <Label htmlFor="specification">Select Specification</Label>
-            <Select value={specificationId} onValueChange={setSpecificationId} disabled={isLoading}>
+            <Select value={specificationId} onValueChange={handleSpecificationChange} disabled={isLoading}>
               <SelectTrigger id="specification" className="w-full">
                 <SelectValue placeholder="Select a specification" />
               </SelectTrigger>
@@ -275,16 +599,29 @@ export default function ComponentDiagram() {
               </SelectContent>
             </Select>
             {isLoading && <p className="text-sm text-muted-foreground mt-1">Loading specifications...</p>}
+
+            {selectedSpecification && (
+              <div className="mt-2 p-3 bg-muted rounded-md">
+                <p className="text-sm font-medium">
+                  {selectedSpecification.app_name} - {selectedSpecification.app_type}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">{selectedSpecification.app_description}</p>
+              </div>
+            )}
           </div>
 
-          <div className="flex justify-end mb-4">
+          <div className="flex justify-end mb-4 gap-2">
+            <Button variant="outline" onClick={copyToClipboard} className="gap-2" disabled={!diagramCode}>
+              {isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              {isCopied ? "Copied" : "Copy"}
+            </Button>
             <Button
               variant="outline"
               onClick={generateComponentDiagram}
               disabled={isGenerating || !specificationId}
               className="gap-2"
             >
-              <Wand2 className="h-4 w-4" />
+              {isGenerating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
               {isGenerating ? "Generating..." : "Generate from Specification"}
             </Button>
           </div>
@@ -295,8 +632,13 @@ export default function ComponentDiagram() {
                 value={diagramCode}
                 onChange={(e) => setDiagramCode(e.target.value)}
                 className="font-mono text-sm h-[400px]"
+                placeholder="Enter Mermaid flowchart code here or generate from a specification..."
               />
-              <Button onClick={handleSave} disabled={isSubmitting || !specificationId} className="mt-4 gap-2">
+              <Button
+                onClick={handleSave}
+                disabled={isSubmitting || !specificationId || !diagramCode}
+                className="mt-4 gap-2"
+              >
                 <Save className="h-4 w-4" />
                 {isSubmitting ? "Saving..." : "Save Component Diagram"}
               </Button>
@@ -304,11 +646,55 @@ export default function ComponentDiagram() {
 
             <div>
               <div className="text-sm font-medium mb-2">Preview:</div>
-              <MermaidDiagram code={diagramCode} className="h-[400px] overflow-auto" />
+              <div className="border rounded-md p-4 h-[400px] overflow-auto bg-white">
+                {diagramCode ? (
+                  <MermaidDiagram code={diagramCode} className="h-full w-full" />
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    No diagram to preview. Generate or enter a diagram.
+                  </div>
+                )}
+                {previewError && (
+                  <div className="mt-2 p-2 text-sm text-red-500 bg-red-50 border border-red-200 rounded">
+                    Error: {previewError}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
     </div>
   )
+}
+
+// Update the generateDefaultDiagram function to ensure proper line breaks between subgraphs
+
+function generateDefaultDiagram(appType: string): string {
+  switch (appType.toLowerCase()) {
+    case "web application":
+      return `graph TD
+    subgraph "Frontend"
+      UI["User Interface"]
+      Components["React Components"]
+      State["State Management"]
+    end
+
+    subgraph "Backend"
+      API["RESTful API"]
+      Logic["Backend Logic"]
+    end
+
+    subgraph "Database"
+      DB["Database"]
+    end
+
+    UI --> Components
+    Components --> State
+    State --> API
+    API --> Logic
+    Logic --> DB`
+
+    // Other cases remain the same...
+  }
 }

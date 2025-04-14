@@ -6,12 +6,18 @@ import { getSupabaseServer } from "@/lib/supabase-server"
 export async function getSpecifications() {
   try {
     const supabaseServer = getSupabaseServer()
+
+    // Log environment variables for debugging (redacted for security)
+    console.log("Supabase URL available:", !!process.env.NEXT_PUBLIC_SUPABASE_URL || !!process.env.SUPABASE_URL)
+    console.log("Supabase Key available:", !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY))
+
     const { data, error } = await supabaseServer
       .from("specifications")
       .select("*")
       .order("created_at", { ascending: false })
 
     if (error) {
+      console.error("Supabase error:", error)
       throw error
     }
 
@@ -23,7 +29,7 @@ export async function getSpecifications() {
     console.error("Error fetching specifications:", error)
     return {
       success: false,
-      error: error.message,
+      error: error.message || "Failed to fetch specifications",
     }
   }
 }
