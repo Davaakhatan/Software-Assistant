@@ -15,7 +15,18 @@ export function getSupabase() {
     throw new Error("Missing Supabase environment variables")
   }
 
-  supabaseInstance = createClient(supabaseUrl, supabaseAnonKey)
+  supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      storageKey: "sdlc-supabase-auth",
+    },
+    global: {
+      headers: {
+        "x-application-name": "sdlc-companion",
+      },
+    },
+  })
+
   return supabaseInstance
 }
 

@@ -1,16 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Download, FileIcon, Loader2, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
-import { createClient } from "@supabase/supabase-js"
-
-// Create a Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-const supabase = createClient(supabaseUrl, supabaseAnonKey)
+import { getSupabase } from "@/lib/supabase"
 
 interface FileBrowserProps {
   bucket: string
@@ -31,19 +26,23 @@ export function FileBrowser({
   const [isLoading, setIsLoading] = useState(true)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
 
-  const loadFiles = async () => {
+  // Use useCallback to memoize the loadFiles function
+  const loadFiles = useCallback(async () => {
     setIsLoading(true)
     try {
+      const supabase = getSupabase()
       console.log(`Loading files from bucket: ${bucket}, path: ${path}`)
 
       // List all files in the bucket with the specified path
-      const { data, error } = await supabase.storage.from(bucket).list(path)
+      const { data, error } = await supabase.storage.from(bucket).list(path, {
+        limit: 100,
+        offset: 0,
+        sortBy: { column: "name", order: "asc" },
+      })
 
       if (error) {
         throw error
       }
-
-      console.log("Files found:", data)
 
       // Get public URLs for all files
       const filesWithUrls = await Promise.all(
@@ -71,15 +70,16 @@ export function FileBrowser({
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [bucket, path])
 
   useEffect(() => {
     loadFiles()
-  }, [bucket, path, refreshTrigger])
+  }, [loadFiles, refreshTrigger])
 
   const handleDelete = async (fileName: string) => {
     setIsDeleting(fileName)
     try {
+      const supabase = getSupabase()
       const filePath = `${path ? `${path}/` : ""}${fileName}`
       const { error } = await supabase.storage.from(bucket).remove([filePath])
 

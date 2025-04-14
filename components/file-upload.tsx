@@ -5,14 +5,9 @@ import type React from "react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Upload } from "lucide-react"
+import { Upload, Loader2 } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
-import { createClient } from "@supabase/supabase-js"
-
-// Create a Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-const supabase = createClient(supabaseUrl, supabaseAnonKey)
+import { getSupabase } from "@/lib/supabase"
 
 interface FileUploadProps {
   bucket: string
@@ -42,8 +37,16 @@ export function FileUpload({ bucket, path, onUploadComplete }: FileUploadProps) 
 
     setIsUploading(true)
     try {
+      const supabase = getSupabase()
       // Upload file to Supabase Storage
       const filePath = `${path}/${file.name}`
+
+      // Check file size
+      if (file.size > 5 * 1024 * 1024) {
+        // 5MB limit
+        throw new Error("File size exceeds 5MB limit")
+      }
+
       const { data, error } = await supabase.storage.from(bucket).upload(filePath, file, {
         cacheControl: "3600",
         upsert: true,
@@ -103,7 +106,7 @@ export function FileUpload({ bucket, path, onUploadComplete }: FileUploadProps) 
       <Button className="w-full" onClick={handleUpload} disabled={!file || isUploading}>
         {isUploading ? (
           <div className="flex items-center">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+            <Loader2 className="h-4 w-4 animate-spin mr-2" />
             Uploading...
           </div>
         ) : (

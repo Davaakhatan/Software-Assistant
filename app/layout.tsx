@@ -5,6 +5,7 @@ import { MainNav } from "@/components/main-nav"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AIProviderContextProvider } from "@/context/ai-provider-context"
 import { AISettings } from "@/components/ai-settings"
+import { Toaster } from "@/components/ui/toaster"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -16,7 +17,7 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <AIProviderContextProvider>
@@ -29,6 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <main className="flex-1 container py-6">{children}</main>
             </div>
             <AISettings />
+            <Toaster />
           </AIProviderContextProvider>
         </ThemeProvider>
       </body>
