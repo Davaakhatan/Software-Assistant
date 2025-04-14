@@ -1,11 +1,19 @@
 "use server"
 
 import { getSupabaseServer } from "@/lib/supabase-server"
+import { revalidatePath } from "next/cache"
 import { generateAIText } from "@/lib/ai-service"
 
-// Generate code from manual requirements
-export async function generateCode(requirements: string, language: string, framework: string) {
+// Function to validate UUID format
+function isValidUUID(id: string | undefined): boolean {
+  if (!id) return true // Consider null/undefined as valid
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  return uuidRegex.test(id)
+}
+
+export async function generateCode(language: string, framework: string, requirements: string) {
   try {
+    // Create a prompt for the AI
     const prompt = `
       Generate ${language} code using the ${framework} framework based on the following requirements:
       
@@ -23,6 +31,7 @@ Follow these guidelines:
 4. Ensure the code is secure and follows modern development standards
 5. Include necessary type definitions if using TypeScript`
 
+    // Generate code using AI
     const result = await generateAIText(prompt, systemPrompt)
 
     if (result.success && result.text) {
@@ -39,7 +48,6 @@ Follow these guidelines:
   }
 }
 
-// Generate code from specification and design
 export async function generateFromSpecificationAndDesign(
   specificationId: string,
   designId: string,
@@ -146,79 +154,158 @@ Follow best practices for ${language} and ${framework}.`
   }
 }
 
-// Save generated code to storage
-export async function saveGeneratedCode(code: string, fileName: string, language: string, framework: string) {
+export async function saveGeneratedCode(
+  code: string,
+  language: string,
+  framework: string,
+  requirements: string,
+  specificationId?: string,
+  designId?: string,
+) {
   try {
     const supabase = getSupabaseServer()
 
-    // Get list of buckets
-    const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets()
+    // Validate UUIDs
+    const validSpecificationId = isValidUUID(specificationId) ? specificationId : null
+    const validDesignId = isValidUUID(designId) ? designId : null
 
-    if (bucketsError) {
-      console.error("Error listing buckets:", bucketsError)
-      return { success: false, error: "Failed to access storage" }
+    const insertData = {
+      generated_code: code,
+      language,
+      framework,
+      requirements,
+      specification_id: validSpecificationId,
+      design_id: validDesignId,
+      created_at: new Date().toISOString(),
     }
 
-    // Use existing bucket or create a new one
-    let bucketName = "code-files"
+    console.log("Data being inserted into generated_code table:", insertData)
 
-    if (buckets && buckets.length > 0) {
-      // Use the first available bucket
-      bucketName = buckets[0].name
-    } else {
-      // Create a new bucket
-      const { error: createError } = await supabase.storage.createBucket(bucketName, {
-        public: true,
+    // Save the generated code to the database
+    const { data, error } = await supabase.from("code_generations").insert([insertData]).select()
+
+    if (error) {
+      console.error("Error saving generated code:", error)
+      try {
+        console.error("Error object (stringified):", JSON.stringify(error, null, 2))
+      } catch (e) {
+        console.error("Error stringifying error object:", e)
+      }
+      console.error("Error properties:", {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
       })
+      return { success: false, error: error.message }
+    }
 
-      if (createError) {
-        console.error("Error creating bucket:", createError)
-        return { success: false, error: "Failed to create storage bucket" }
+    revalidatePath("/code-generation")
+    return { success: true, data: data[0] }
+  } catch (error) {
+    console.error("Error saving generated code:", error)
+    try {
+      console.error("Error object (stringified):", JSON.stringify(error, null, 2))
+    } catch (e) {
+      console.error("Error stringifying error object:", e)
+    }
+    if (error instanceof Error) {
+      console.error("Error stack trace:", error.stack)
+    }
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to save code. Please try again.",
+    }
+  }
+}
+
+export async function getGeneratedCode() {
+  try {
+    const supabase = getSupabaseServer()
+    const { data, error } = await supabase
+      .from("code_generations")
+      .select("*, specifications(app_name), designs(type)")
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Error fetching generated code:", error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error fetching generated code:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to fetch generated code. Please try again.",
+    }
+  }
+}
+
+export async function getGeneratedCodeById(id: string) {
+  try {
+    const supabase = getSupabaseServer()
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return {
+        success: false,
+        error: "Invalid generated code ID format",
       }
     }
 
-    // Create a folder path based on language
-    const folderPath = language.toLowerCase()
-    const filePath = `${folderPath}/${fileName}`
+    const { data, error } = await supabase
+      .from("code_generations")
+      .select("*, specifications(app_name), designs(type)")
+      .eq("id", id)
+      .single()
 
-    // Upload the file
-    const { error: uploadError } = await supabase.storage.from(bucketName).upload(filePath, code, {
-      contentType: "text/plain",
-      upsert: true,
-    })
-
-    if (uploadError) {
-      console.error("Error uploading file:", uploadError)
-      return { success: false, error: "Failed to save file" }
-    }
-
-    // Get the public URL
-    const { data: publicUrl } = supabase.storage.from(bucketName).getPublicUrl(filePath)
-
-    // Try to save metadata to the files table if it exists
-    try {
-      await supabase.from("files").insert({
-        name: fileName,
-        path: filePath,
-        bucket: bucketName,
-        url: publicUrl.publicUrl,
-        type: "code",
-        metadata: { language, framework },
-      })
-    } catch (dbError) {
-      // Continue even if metadata saving fails
-      console.warn("Could not save file metadata to database:", dbError)
+    if (error) {
+      throw error
     }
 
     return {
       success: true,
-      message: "Code saved successfully",
-      url: publicUrl.publicUrl,
-      path: filePath,
-      bucket: bucketName,
+      data,
     }
   } catch (error) {
-    console.error("Error saving generated code:", error)
-    return { success: false, error: error instanceof Error ? error.message : "Failed to save code. Please try again." }
+    console.error("Error fetching generated code by ID:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to fetch generated code. Please try again.",
+    }
+  }
+}
+
+export async function deleteGeneratedCode(id: string) {
+  try {
+    const supabase = getSupabaseServer()
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(id)) {
+      return {
+        success: false,
+        error: "Invalid generated code ID format",
+      }
+    }
+
+    const { error } = await supabase.from("code_generations").delete().eq("id", id)
+
+    if (error) {
+      throw error
+    }
+
+    revalidatePath("/code-generation")
+    return {
+      success: true,
+    }
+  } catch (error) {
+    console.error("Error deleting generated code:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to delete generated code. Please try again.",
+    }
   }
 }

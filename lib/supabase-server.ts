@@ -18,5 +18,7 @@ export const getSupabaseServer = () => {
   if (!supabaseUrl || !supabaseKey) {
     throw new Error("Missing Supabase environment variables")
   }
+  console.log("Supabase URL:", supabaseUrl)
+  console.log("Supabase Key (truncated):", supabaseKey ? supabaseKey.substring(0, 5) + "..." : null)
   return supabaseServer
 }

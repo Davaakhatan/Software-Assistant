@@ -7,88 +7,177 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { generateCode, generateFromSpecificationAndDesign } from "./actions"
-import { Loader2 } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { generateCode, generateFromSpecificationAndDesign, saveGeneratedCode } from "./actions"
+import { Loader2, Code, Save, Copy, Download } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
-// Programming languages and frameworks options
-const LANGUAGES = [
-  { value: "typescript", label: "TypeScript" },
-  { value: "javascript", label: "JavaScript" },
-  { value: "python", label: "Python" },
-  { value: "java", label: "Java" },
-  { value: "csharp", label: "C#" },
-  { value: "go", label: "Go" },
-  { value: "rust", label: "Rust" },
-  { value: "php", label: "PHP" },
-  { value: "ruby", label: "Ruby" },
-]
+interface CodeGenerationFormProps {
+  specifications: any[]
+  designs: any[]
+}
 
-const FRAMEWORKS = [
-  { value: "nextjs", label: "Next.js" },
-  { value: "react", label: "React" },
-  { value: "vue", label: "Vue.js" },
-  { value: "angular", label: "Angular" },
-  { value: "svelte", label: "Svelte" },
-  { value: "express", label: "Express.js" },
-  { value: "nestjs", label: "NestJS" },
-  { value: "django", label: "Django" },
-  { value: "flask", label: "Flask" },
-  { value: "spring", label: "Spring Boot" },
-  { value: "aspnet", label: "ASP.NET Core" },
-  { value: "laravel", label: "Laravel" },
-  { value: "rails", label: "Ruby on Rails" },
-]
+export default function CodeGenerationForm({ specifications, designs }: CodeGenerationFormProps) {
+  const { toast } = useToast()
+  const [activeTab, setActiveTab] = useState("fromSpecDesign")
+  const [specId, setSpecId] = useState("")
+  const [designId, setDesignId] = useState("")
+  const [manualRequirements, setManualRequirements] = useState("")
+  const [language, setLanguage] = useState("typescript")
+  const [framework, setFramework] = useState("nextjs")
+  const [generatedCode, setGeneratedCode] = useState("")
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [fileName, setFileName] = useState("")
+  const [filteredDesigns, setFilteredDesigns] = useState<any[]>([])
 
-export default function CodeGenerationForm({
-  specifications,
-  designs,
-}: {
-  specifications: { id: string; app_name: string }[]
-  designs: { id: string; name: string }[]
-}) {
-  const [activeTab, setActiveTab] = useState("spec-design")
-  const [specificationId, setSpecificationId] = useState<string>("none")
-  const [designId, setDesignId] = useState<string>("none")
-  const [requirements, setRequirements] = useState<string>("")
-  const [language, setLanguage] = useState<string>("typescript")
-  const [framework, setFramework] = useState<string>("nextjs")
-  const [isGenerating, setIsGenerating] = useState<boolean>(false)
-  const [generatedCode, setGeneratedCode] = useState<string>("")
-  const [error, setError] = useState<string>("")
+  // Update filtered designs when specification changes
+  const handleSpecificationChange = (id: string) => {
+    setSpecId(id)
+    if (id) {
+      const relatedDesigns = designs.filter((design) => {
+        // Check if the design is related to this specification
+        // This depends on your data structure - adjust as needed
+        const requirement = design.requirements
+        return requirement && requirement.specification_id === id
+      })
+      setFilteredDesigns(relatedDesigns)
+      setDesignId("") // Reset design selection
+    } else {
+      setFilteredDesigns([])
+      setDesignId("")
+    }
+  }
 
   const handleGenerate = async () => {
+    if (activeTab === "fromSpecDesign" && !specId) {
+      toast({
+        title: "Error",
+        description: "Please select a specification",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (activeTab === "manual" && !manualRequirements.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter requirements",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsGenerating(true)
-    setError("")
-    setGeneratedCode("")
-
     try {
-      if (activeTab === "spec-design") {
-        const result = await generateFromSpecificationAndDesign(specificationId, designId, language, framework)
-        if (result.success) {
-          setGeneratedCode(result.code)
-        } else {
-          setError(result.error || "Failed to generate code")
-        }
+      let result
+      if (activeTab === "fromSpecDesign") {
+        result = await generateFromSpecificationAndDesign(specId, designId, language, framework)
       } else {
-        if (!requirements.trim()) {
-          setError("Please enter requirements")
-          setIsGenerating(false)
-          return
-        }
-
-        const result = await generateCode(language, framework, requirements)
-        if (result.success) {
-          setGeneratedCode(result.code)
-        } else {
-          setError(result.error || "Failed to generate code")
-        }
+        result = await generateCode(language, framework, manualRequirements)
       }
-    } catch (err) {
-      console.error("Error generating code:", err)
-      setError("An unexpected error occurred")
+
+      if (result.success) {
+        setGeneratedCode(result.code)
+
+        // Set a default file name based on the selected options
+        const specName = specifications.find((spec) => spec.id === specId)?.app_name || "app"
+        const fileExtension = language === "typescript" ? ".ts" : language === "javascript" ? ".js" : ".txt"
+        setFileName(`${specName.toLowerCase().replace(/\s+/g, "-")}${fileExtension}`)
+
+        toast({
+          title: "Code generated",
+          description: "Your code has been generated successfully",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: result.error || "Failed to generate code",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error generating code:", error)
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred",
+        variant: "destructive",
+      })
     } finally {
       setIsGenerating(false)
     }
+  }
+
+  const handleSave = async () => {
+    if (!generatedCode) {
+      toast({
+        title: "Error",
+        description: "No code to save. Please generate code first.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const result = await saveGeneratedCode(
+        generatedCode,
+        language,
+        framework,
+        activeTab === "manual" ? manualRequirements : "Generated from specification and design",
+        activeTab === "fromSpecDesign" ? specId : undefined,
+        activeTab === "fromSpecDesign" ? designId : undefined,
+      )
+
+      if (result.success) {
+        toast({
+          title: "Code saved",
+          description: "Your generated code has been saved successfully",
+        })
+      } else {
+        toast({
+          title: "Error",
+          description: result.error || "Failed to save code",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error saving code:", error)
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(generatedCode)
+    toast({
+      title: "Copied",
+      description: "Code copied to clipboard",
+    })
+  }
+
+  const handleDownload = () => {
+    if (!generatedCode) return
+
+    const blob = new Blob([generatedCode], { type: "text/plain" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = fileName || `code.${language === "typescript" ? "ts" : "js"}`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    toast({
+      title: "Downloaded",
+      description: "Code downloaded successfully",
+    })
   }
 
   return (
@@ -96,19 +185,20 @@ export default function CodeGenerationForm({
       <Card>
         <CardHeader>
           <CardTitle>Generate Code</CardTitle>
-          <CardDescription>Generate code based on your specifications and designs</CardDescription>
+          <CardDescription>Generate code from specifications, designs, or custom requirements</CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="spec-design">From Specification & Design</TabsTrigger>
+              <TabsTrigger value="fromSpecDesign">From Specification & Design</TabsTrigger>
               <TabsTrigger value="manual">Enter Requirements Manually</TabsTrigger>
             </TabsList>
-            <TabsContent value="spec-design" className="space-y-4 pt-4">
+
+            <TabsContent value="fromSpecDesign" className="space-y-4 pt-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="specification">Specification</Label>
-                  <Select value={specificationId} onValueChange={setSpecificationId}>
+                  <Select value={specId} onValueChange={handleSpecificationChange}>
                     <SelectTrigger id="specification">
                       <SelectValue placeholder="Select a specification" />
                     </SelectTrigger>
@@ -122,17 +212,28 @@ export default function CodeGenerationForm({
                     </SelectContent>
                   </Select>
                 </div>
+
                 <div className="space-y-2">
-                  <Label htmlFor="design">Design</Label>
-                  <Select value={designId} onValueChange={setDesignId}>
+                  <Label htmlFor="design">Design (Optional)</Label>
+                  <Select
+                    value={designId}
+                    onValueChange={setDesignId}
+                    disabled={!specId || filteredDesigns.length === 0}
+                  >
                     <SelectTrigger id="design">
-                      <SelectValue placeholder="Select a design" />
+                      <SelectValue
+                        placeholder={filteredDesigns.length === 0 ? "No designs available" : "Select a design"}
+                      />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">None</SelectItem>
-                      {designs.map((design) => (
+                      {filteredDesigns.map((design) => (
                         <SelectItem key={design.id} value={design.id}>
-                          {design.name}
+                          {design.type === "architecture"
+                            ? "System Architecture"
+                            : design.type === "data-model"
+                              ? "Data Model"
+                              : "Component Diagram"}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -140,7 +241,6 @@ export default function CodeGenerationForm({
                 </div>
               </div>
 
-              {/* Add language and framework selectors for spec-design tab */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div className="space-y-2">
                   <Label htmlFor="language-spec">Programming Language</Label>
@@ -149,11 +249,11 @@ export default function CodeGenerationForm({
                       <SelectValue placeholder="Select a language" />
                     </SelectTrigger>
                     <SelectContent>
-                      {LANGUAGES.map((lang) => (
-                        <SelectItem key={lang.value} value={lang.value}>
-                          {lang.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="typescript">TypeScript</SelectItem>
+                      <SelectItem value="javascript">JavaScript</SelectItem>
+                      <SelectItem value="python">Python</SelectItem>
+                      <SelectItem value="java">Java</SelectItem>
+                      <SelectItem value="csharp">C#</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -164,16 +264,18 @@ export default function CodeGenerationForm({
                       <SelectValue placeholder="Select a framework" />
                     </SelectTrigger>
                     <SelectContent>
-                      {FRAMEWORKS.map((fw) => (
-                        <SelectItem key={fw.value} value={fw.value}>
-                          {fw.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="nextjs">Next.js</SelectItem>
+                      <SelectItem value="react">React</SelectItem>
+                      <SelectItem value="express">Express.js</SelectItem>
+                      <SelectItem value="django">Django</SelectItem>
+                      <SelectItem value="spring">Spring Boot</SelectItem>
+                      <SelectItem value="aspnet">ASP.NET Core</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
             </TabsContent>
+
             <TabsContent value="manual" className="space-y-4 pt-4">
               <div className="space-y-2">
                 <Label htmlFor="requirements">Requirements</Label>
@@ -181,12 +283,11 @@ export default function CodeGenerationForm({
                   id="requirements"
                   placeholder="Enter your requirements here..."
                   className="min-h-[150px]"
-                  value={requirements}
-                  onChange={(e) => setRequirements(e.target.value)}
+                  value={manualRequirements}
+                  onChange={(e) => setManualRequirements(e.target.value)}
                 />
               </div>
 
-              {/* Language and framework selectors for manual tab */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div className="space-y-2">
                   <Label htmlFor="language-manual">Programming Language</Label>
@@ -195,11 +296,11 @@ export default function CodeGenerationForm({
                       <SelectValue placeholder="Select a language" />
                     </SelectTrigger>
                     <SelectContent>
-                      {LANGUAGES.map((lang) => (
-                        <SelectItem key={lang.value} value={lang.value}>
-                          {lang.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="typescript">TypeScript</SelectItem>
+                      <SelectItem value="javascript">JavaScript</SelectItem>
+                      <SelectItem value="python">Python</SelectItem>
+                      <SelectItem value="java">Java</SelectItem>
+                      <SelectItem value="csharp">C#</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -210,11 +311,12 @@ export default function CodeGenerationForm({
                       <SelectValue placeholder="Select a framework" />
                     </SelectTrigger>
                     <SelectContent>
-                      {FRAMEWORKS.map((fw) => (
-                        <SelectItem key={fw.value} value={fw.value}>
-                          {fw.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="nextjs">Next.js</SelectItem>
+                      <SelectItem value="react">React</SelectItem>
+                      <SelectItem value="express">Express.js</SelectItem>
+                      <SelectItem value="django">Django</SelectItem>
+                      <SelectItem value="spring">Spring Boot</SelectItem>
+                      <SelectItem value="aspnet">ASP.NET Core</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -223,31 +325,67 @@ export default function CodeGenerationForm({
           </Tabs>
 
           <div className="flex justify-end mt-6">
-            <Button onClick={handleGenerate} disabled={isGenerating}>
+            <Button onClick={handleGenerate} disabled={isGenerating} className="flex items-center gap-2">
               {isGenerating ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" />
                   Generating...
                 </>
               ) : (
-                "Generate Code"
+                <>
+                  <Code className="h-4 w-4" />
+                  Generate Code
+                </>
               )}
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">{error}</div>}
-
       {generatedCode && (
         <Card>
           <CardHeader>
             <CardTitle>Generated Code</CardTitle>
+            <CardDescription>Review, save, or download your generated code</CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="bg-gray-900 text-gray-100 p-4 rounded overflow-auto max-h-[500px]">
-              <code>{generatedCode}</code>
-            </pre>
+            <div className="mb-4 flex items-end gap-4">
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="file-name">File Name</Label>
+                <Input
+                  id="file-name"
+                  value={fileName}
+                  onChange={(e) => setFileName(e.target.value)}
+                  placeholder="Enter file name"
+                />
+              </div>
+              <Button variant="outline" onClick={handleCopy} className="flex items-center gap-2">
+                <Copy className="h-4 w-4" />
+                Copy
+              </Button>
+              <Button variant="outline" onClick={handleDownload} className="flex items-center gap-2">
+                <Download className="h-4 w-4" />
+                Download
+              </Button>
+              <Button onClick={handleSave} disabled={isSaving} className="flex items-center gap-2">
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Save
+                  </>
+                )}
+              </Button>
+            </div>
+            <div className="relative">
+              <pre className="bg-muted p-4 rounded-md overflow-auto max-h-[500px] text-sm font-mono">
+                {generatedCode}
+              </pre>
+            </div>
           </CardContent>
         </Card>
       )}
