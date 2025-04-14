@@ -2,13 +2,14 @@ import { type NextRequest, NextResponse } from "next/server"
 import { getSupabaseServer } from "@/lib/supabase-server"
 import { generateAIText } from "@/lib/ai-service"
 
+export const maxDuration = 60 // Extend the function timeout to 60 seconds
+
 export async function POST(request: NextRequest) {
   try {
     const { activeTab, specificationId, designId, requirements, language, framework } = await request.json()
 
     console.log("Generate code request received:", { activeTab, specificationId, designId, language, framework })
 
-    let code = ""
     let prompt = ""
     let systemPrompt = ""
 
@@ -16,29 +17,24 @@ export async function POST(request: NextRequest) {
     if (activeTab === "fromSpecDesign") {
       const supabase = getSupabaseServer()
 
-      // Fetch specification
-      const { data: specification, error: specError } = await supabase
-        .from("specifications")
-        .select("*")
-        .eq("id", specificationId)
-        .single()
+      // Fetch specification and design in parallel to save time
+      const [specResult, designResult] = await Promise.all([
+        supabase.from("specifications").select("*").eq("id", specificationId).single(),
+        supabase.from("designs").select("*").eq("id", designId).single(),
+      ])
 
-      if (specError) {
-        console.error("Error fetching specification:", specError)
+      if (specResult.error) {
+        console.error("Error fetching specification:", specResult.error)
         return NextResponse.json({ error: "Failed to fetch specification" }, { status: 400 })
       }
 
-      // Fetch design
-      const { data: design, error: designError } = await supabase
-        .from("designs")
-        .select("*")
-        .eq("id", designId)
-        .single()
-
-      if (designError) {
-        console.error("Error fetching design:", designError)
+      if (designResult.error) {
+        console.error("Error fetching design:", designResult.error)
         return NextResponse.json({ error: "Failed to fetch design" }, { status: 400 })
       }
+
+      const specification = specResult.data
+      const design = designResult.data
 
       // Build prompt based on specification and design
       prompt = `Generate ${language} code using the ${framework} framework based on the following information:
@@ -119,7 +115,7 @@ Follow these guidelines:
         return NextResponse.json({ error: result.error || "Failed to generate code" }, { status: 500 })
       }
 
-      code = result.text
+      const code = result.text
       console.log("Code generated successfully")
 
       // Save the generated code to the code_generations table if possible
