@@ -2,9 +2,29 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
 import { ArrowLeft, Plus } from "lucide-react"
-import { getDesigns } from "../design/actions"
 import { formatDate } from "@/lib/utils"
 import MermaidDiagram from "@/components/mermaid-diagram"
+import { getSupabase } from "@/lib/supabase"
+
+export async function getDesigns() {
+  try {
+    const supabase = getSupabase()
+    const { data, error } = await supabase
+      .from("designs")
+      .select("*, requirements(project_name, specification_id, specifications(app_name))")
+      .order("created_at", { ascending: false })
+
+    if (error) {
+      console.error("Error fetching designs:", error)
+      return { success: false, error: error.message }
+    }
+
+    return { success: true, data }
+  } catch (error) {
+    console.error("Error in getDesigns:", error)
+    return { success: false, error: "Failed to fetch designs" }
+  }
+}
 
 export default async function DesignsList() {
   const { data: designs, success } = await getDesigns()
@@ -36,21 +56,15 @@ export default async function DesignsList() {
           {designs.map((design) => (
             <Card key={design.id} className="flex flex-col">
               <CardHeader>
-                <CardTitle>
+                <CardTitle>{design.requirements?.project_name || "Unknown App"}</CardTitle>
+                <CardDescription>
                   {design.type === "architecture"
                     ? "System Architecture"
                     : design.type === "data-model"
                       ? "Data Model"
                       : "Component Diagram"}
-                </CardTitle>
-                <CardDescription>
+                  <br />
                   Created on {formatDate(design.created_at)}
-                  {design.project_name && (
-                    <>
-                      <br />
-                      Project: {design.project_name}
-                    </>
-                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex-grow">

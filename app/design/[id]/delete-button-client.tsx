@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast"
 import { deleteDesign } from "../actions"
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -24,6 +25,7 @@ export default function DeleteDesignButtonClient({ id }) {
   const { toast } = useToast()
 
   const handleDelete = async () => {
+    console.log("handleDelete called")
     setIsDeleting(true)
     try {
       const result = await deleteDesign(id)
@@ -32,12 +34,8 @@ export default function DeleteDesignButtonClient({ id }) {
           title: "Design deleted",
           description: "The design has been deleted successfully.",
         })
-        // Close the dialog first
         setIsOpen(false)
-        // Use setTimeout to ensure the dialog is closed before navigation
-        setTimeout(() => {
-          router.push("/design-list")
-        }, 100)
+        router.push("/design-list")
       } else {
         throw new Error(result.error || "Failed to delete design")
       }
@@ -52,9 +50,22 @@ export default function DeleteDesignButtonClient({ id }) {
   }
 
   return (
-    <AlertDialog open={isOpen} onOpenChange={setIsOpen}>
+    <AlertDialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        console.log("AlertDialog onOpenChange:", open)
+        setIsOpen(open)
+      }}
+    >
       <AlertDialogTrigger asChild>
-        <Button variant="destructive" className="gap-2">
+        <Button
+          variant="destructive"
+          className="gap-2"
+          onClick={() => {
+            console.log("Delete button clicked, setting isOpen to true")
+            setIsOpen(true)
+          }}
+        >
           <Trash className="h-4 w-4" />
           Delete
         </Button>
@@ -67,10 +78,24 @@ export default function DeleteDesignButtonClient({ id }) {
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
+          <AlertDialogCancel
+            onClick={() => {
+              console.log("Cancel clicked, setting isOpen to false")
+              setIsOpen(false)
+            }}
+          >
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              console.log("AlertDialogAction clicked")
+              handleDelete()
+            }}
+            disabled={isDeleting}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
             {isDeleting ? "Deleting..." : "Delete"}
-          </Button>
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

@@ -61,7 +61,6 @@
     "ws": "latest",
     "@supabase/supabase-js": "latest",
     "ai": "latest",
-    "uuid": "latest",
     "@ai-sdk/openai": "latest",
     "openai": "latest",
     "@supabase/auth-helpers-nextjs": "latest",
