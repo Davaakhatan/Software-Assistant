@@ -13,14 +13,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { deleteGeneratedCode } from "@/app/code-generation/actions"
 import { useRouter } from "next/navigation"
 
 interface DeleteCodeButtonProps {
   id: string
+  onDelete: (id: string) => Promise<{ success: boolean; error?: string }>
 }
 
-export function DeleteCodeButton({ id }: DeleteCodeButtonProps) {
+export function DeleteCodeButton({ id, onDelete }: DeleteCodeButtonProps) {
   const [open, setOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const router = useRouter()
@@ -28,7 +28,7 @@ export function DeleteCodeButton({ id }: DeleteCodeButtonProps) {
   const handleDelete = async () => {
     setIsDeleting(true)
     try {
-      const result = await deleteGeneratedCode(id)
+      const result = await onDelete(id)
       if (result.success) {
         router.refresh()
       } else {

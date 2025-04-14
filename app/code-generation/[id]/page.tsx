@@ -1,5 +1,5 @@
 import type { Metadata } from "next"
-import { getGeneratedCodeById } from "../actions"
+import { getGeneratedCodeById, deleteGeneratedCode } from "@/app/code-generation/actions"
 import { notFound } from "next/navigation"
 import CodeGenerationClientPage from "./ClientPage"
 
@@ -28,5 +28,5 @@ export default async function CodeGenerationPage({ params }: { params: { id: str
     )
   }
 
-  return <CodeGenerationClientPage data={data} id={id} />
+  return <CodeGenerationClientPage data={data} id={id} onDelete={deleteGeneratedCode} />
 }
