@@ -1,5 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 
+// Set the correct maxDuration for Hobby plan (between 1 and 60 seconds)
+export const runtime = "edge" // This removes the maxDuration issue as Edge functions have different limits
+
 export async function POST(request: NextRequest) {
   try {
     const { code, fileName, language, framework, requirements } = await request.json()
