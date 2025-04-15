@@ -1,4 +1,5 @@
-"use client"
+// IMPORTANT: REMOVE THE "use client" DIRECTIVE COMPLETELY
+// ONLY KEEP THE "use server" DIRECTIVE
 
 "use server"
 
