@@ -65,7 +65,9 @@
     "openai": "latest",
     "@supabase/auth-helpers-nextjs": "latest",
     "mermaid": "latest",
-    "prismjs": "latest"
+    "prismjs": "latest",
+    "fs": "latest",
+    "path": "latest"
   },
   "devDependencies": {
     "@types/node": "^22",

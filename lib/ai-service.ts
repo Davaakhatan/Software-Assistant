@@ -1,62 +1,94 @@
-import { generateText } from "ai"
-import { openai } from "@ai-sdk/openai"
+"use server"
 
-export type AIProvider = "openai" | "deepseek"
+import OpenAI from "openai"
 
-export interface AIServiceOptions {
-  provider?: AIProvider
+interface AITextOptions {
   temperature?: number
   maxTokens?: number
-  timeoutMs?: number
+  timeout?: number
 }
 
-/**
- * Generates text using the AI SDK with timeout handling
- */
 export async function generateAIText(
   prompt: string,
-  systemPrompt = "",
-  options: AIServiceOptions = {},
+  systemPrompt = "You are a helpful assistant.",
+  options: AITextOptions = {},
 ): Promise<{ success: boolean; text?: string; error?: string }> {
-  const { temperature = 0.7, maxTokens, timeoutMs = 25000 } = options
+  const { temperature = 0.7, maxTokens = 2000, timeout = 30000 } = options
 
   try {
-    // Create a promise that rejects after the timeout
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`AI request timed out after ${timeoutMs}ms`))
-      }, timeoutMs)
-    })
-
-    // The actual AI request using the AI SDK
-    const aiRequestPromise = generateText({
-      model: openai("gpt-4o"),
-      prompt,
-      system: systemPrompt,
-      temperature,
-      maxTokens,
-    }).then((result) => ({
-      success: true as const,
-      text: result.text,
-    }))
-
-    // Race between the timeout and the actual request
-    const result = await Promise.race([aiRequestPromise, timeoutPromise])
-    return result
-  } catch (error) {
-    console.error("Error generating text with AI:", error)
-
-    // Check if it's a timeout error
-    if (error instanceof Error && error.message.includes("timed out")) {
+    // Check if we have an API key
+    const apiKey = process.env.OPENAI_API_KEY
+    if (!apiKey) {
+      console.warn("No OpenAI API key found. Using fallback response.")
       return {
         success: false,
-        error: "The AI service took too long to respond. Please try with a simpler request or try again later.",
+        error: "OpenAI API key not configured",
+        text: `// Fallback response (no API key)
+// This is a placeholder response since the OpenAI API key is not configured.
+// Please add your API key to the environment variables.
+
+function main() {
+  console.log("Hello from the fallback response!");
+  return "This is a fallback response.";
+}
+
+export default main;`,
       }
     }
 
+    // Create OpenAI client
+    const openai = new OpenAI({
+      apiKey: apiKey,
+    })
+
+    // Set up timeout
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+    try {
+      const response = await openai.chat.completions.create(
+        {
+          model: "gpt-3.5-turbo",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+          temperature: temperature,
+          max_tokens: maxTokens,
+        },
+        { signal: controller.signal },
+      )
+
+      clearTimeout(timeoutId)
+
+      const generatedText = response.choices[0]?.message?.content?.trim()
+
+      if (!generatedText) {
+        return {
+          success: false,
+          error: "No text was generated",
+        }
+      }
+
+      return {
+        success: true,
+        text: generatedText,
+      }
+    } catch (error) {
+      clearTimeout(timeoutId)
+      if (error instanceof Error && error.name === "AbortError") {
+        return {
+          success: false,
+          error: "Request timed out",
+        }
+      }
+      throw error
+    }
+  } catch (error) {
+    console.error("Error generating AI text:", error)
     return {
       success: false,
-      error: error instanceof Error ? error.message : "An unexpected error occurred",
+      error: error instanceof Error ? error.message : "Unknown error occurred",
     }
   }
 }
