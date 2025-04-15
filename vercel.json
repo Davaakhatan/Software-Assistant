@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/generate-code-fallback": {
+      "maxDuration": 60
+    }
+  }
+}
