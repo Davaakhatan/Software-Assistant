@@ -7,18 +7,21 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Check, Download, Plus, Save, TestTube, Trash, Wand2 } from "lucide-react"
+import { Check, Download, Plus, Save, Sparkles, TestTube, Trash, Wand2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
 import { getDesigns } from "../design/actions"
 import { getSupabase } from "@/lib/supabase"
-import { saveTestCases } from "./actions"
+import { generateAITestCases, saveTestCases } from "./actions"
+import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
 
 export default function TestCaseGenerator() {
   const { toast } = useToast()
   const [testType, setTestType] = useState("unit")
   const [framework, setFramework] = useState("jest")
   const [componentToTest, setComponentToTest] = useState("")
+  const [componentDescription, setComponentDescription] = useState("")
   const [testCases, setTestCases] = useState([
     { description: "should render correctly", expectation: "component renders without errors" },
   ])
@@ -27,6 +30,7 @@ export default function TestCaseGenerator() {
   const [isSaving, setIsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState("define")
   const [testName, setTestName] = useState("")
+  const [useAI, setUseAI] = useState(true)
 
   // Added for integration with specifications and designs
   const [specificationsList, setSpecificationsList] = useState([])
@@ -35,6 +39,8 @@ export default function TestCaseGenerator() {
   const [designsList, setDesignsList] = useState([])
   const [selectedDesignId, setSelectedDesignId] = useState("")
   const [isLoadingDesigns, setIsLoadingDesigns] = useState(false)
+  const [specificationData, setSpecificationData] = useState(null)
+  const [designData, setDesignData] = useState(null)
 
   // Fetch specifications list on component mount
   useEffect(() => {
@@ -55,6 +61,49 @@ export default function TestCaseGenerator() {
 
     fetchSpecifications()
   }, [])
+
+  // Fetch specification details when a specification is selected
+  useEffect(() => {
+    const fetchSpecificationDetails = async () => {
+      if (!selectedSpecificationId) {
+        setSpecificationData(null)
+        return
+      }
+
+      try {
+        const result = await getSpecificationById(selectedSpecificationId)
+        if (result.success) {
+          setSpecificationData(result.data)
+
+          // Set default test name based on specification
+          const appName = result.data.app_name || "MyApp"
+          setTestName(`${appName} - ${testType} tests`)
+
+          // Set component to test based on app type
+          let componentName = ""
+          if (result.data.app_type === "ecommerce") {
+            componentName = "ProductComponent"
+          } else if (result.data.app_type === "crm") {
+            componentName = "ContactManagementComponent"
+          } else {
+            componentName = "DashboardComponent"
+          }
+          setComponentToTest(componentName)
+
+          // Set component description based on specification
+          setComponentDescription(
+            `A ${result.data.app_type} component for ${appName} that handles ${result.data.app_type === "ecommerce" ? "product display and shopping cart" : result.data.app_type === "crm" ? "contact management and customer data" : "dashboard data visualization"}.`,
+          )
+        } else {
+          console.error("Failed to load specification details:", result.error)
+        }
+      } catch (error) {
+        console.error("Error fetching specification details:", error)
+      }
+    }
+
+    fetchSpecificationDetails()
+  }, [selectedSpecificationId, testType])
 
   // Fetch designs when a specification is selected
   useEffect(() => {
@@ -101,6 +150,32 @@ export default function TestCaseGenerator() {
     fetchDesigns()
   }, [selectedSpecificationId])
 
+  // Fetch design details when a design is selected
+  useEffect(() => {
+    const fetchDesignDetails = async () => {
+      if (!selectedDesignId) {
+        setDesignData(null)
+        return
+      }
+
+      try {
+        const supabase = getSupabase()
+        const { data, error } = await supabase.from("designs").select("*").eq("id", selectedDesignId).single()
+
+        if (error) {
+          console.error("Error fetching design details:", error)
+          return
+        }
+
+        setDesignData(data)
+      } catch (error) {
+        console.error("Error fetching design details:", error)
+      }
+    }
+
+    fetchDesignDetails()
+  }, [selectedDesignId])
+
   const addTestCase = () => {
     setTestCases([...testCases, { description: "", expectation: "" }])
   }
@@ -115,6 +190,55 @@ export default function TestCaseGenerator() {
     const updatedTestCases = [...testCases]
     updatedTestCases.splice(index, 1)
     setTestCases(updatedTestCases)
+  }
+
+  // Function to generate test cases using AI
+  const generateWithAI = async () => {
+    if (!componentToTest.trim()) {
+      toast({
+        title: "Component name required",
+        description: "Please provide a component name to generate tests.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsGenerating(true)
+    setActiveTab("generated")
+
+    try {
+      // Call the server action to generate test cases with AI
+      const result = await generateAITestCases({
+        testType,
+        framework,
+        componentToTest,
+        componentDescription,
+        specificationData,
+        designData,
+      })
+
+      if (!result.success) {
+        throw new Error(result.error || "Failed to generate tests with AI")
+      }
+
+      // Update the UI with the generated test cases and code
+      setTestCases(result.testCases || [])
+      setGeneratedTests(result.testCode || "")
+
+      toast({
+        title: "AI tests generated",
+        description: "Test cases have been generated using AI.",
+      })
+    } catch (error) {
+      console.error("Error generating tests with AI:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to generate tests with AI",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   // Function to generate test cases from specification and design
@@ -132,6 +256,12 @@ export default function TestCaseGenerator() {
     setActiveTab("generated")
 
     try {
+      if (useAI) {
+        // Use AI to generate tests based on specification
+        await generateWithAI()
+        return
+      }
+
       // Get specification details
       const specResult = await getSpecificationById(selectedSpecificationId)
       if (!specResult.success) {
@@ -471,7 +601,10 @@ describe('${componentName}', () => {
   }
 
   const handleGenerate = async () => {
-    if (selectedSpecificationId) {
+    if (useAI) {
+      // Generate with AI
+      await generateWithAI()
+    } else if (selectedSpecificationId) {
       // Generate from specification
       await generateFromSpecification()
     } else {
@@ -656,6 +789,14 @@ describe('${componentToTest.split("/").pop()}', () => {
               <CardDescription>Define what you want to test</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="flex items-center space-x-2">
+                <Switch id="use-ai" checked={useAI} onCheckedChange={setUseAI} />
+                <Label htmlFor="use-ai" className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-yellow-500" />
+                  Use AI to generate tests
+                </Label>
+              </div>
+
               <div className="space-y-4">
                 <Label>Generate from Specification</Label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -713,7 +854,7 @@ describe('${componentToTest.split("/").pop()}', () => {
                     disabled={!selectedSpecificationId || isGenerating}
                     className="gap-2"
                   >
-                    <Wand2 className="h-4 w-4" />
+                    {useAI ? <Sparkles className="h-4 w-4 text-yellow-500" /> : <Wand2 className="h-4 w-4" />}
                     Generate from Specification
                   </Button>
                 </div>
@@ -763,49 +904,66 @@ describe('${componentToTest.split("/").pop()}', () => {
                   />
                 </div>
 
-                <div className="space-y-4 mt-4">
-                  <div className="flex items-center justify-between">
-                    <Label>Test Cases</Label>
-                    <Button type="button" onClick={addTestCase} variant="outline" size="sm">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Test Case
-                    </Button>
+                {useAI && (
+                  <div className="space-y-2 mt-4">
+                    <Label htmlFor="component-description">
+                      Component Description (helps AI generate better tests)
+                    </Label>
+                    <Textarea
+                      id="component-description"
+                      placeholder="Describe what the component does, its props, and expected behavior..."
+                      value={componentDescription}
+                      onChange={(e) => setComponentDescription(e.target.value)}
+                      rows={3}
+                    />
                   </div>
+                )}
 
-                  {testCases.map((testCase, index) => (
-                    <div key={index} className="space-y-4 p-4 border rounded-md relative">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="absolute top-2 right-2 h-8 w-8"
-                        onClick={() => removeTestCase(index)}
-                      >
-                        <Trash className="h-4 w-4" />
+                {!useAI && (
+                  <div className="space-y-4 mt-4">
+                    <div className="flex items-center justify-between">
+                      <Label>Test Cases</Label>
+                      <Button type="button" onClick={addTestCase} variant="outline" size="sm">
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Test Case
                       </Button>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`test-desc-${index}`}>Test Description</Label>
-                        <Input
-                          id={`test-desc-${index}`}
-                          placeholder="e.g., should render the button correctly"
-                          value={testCase.description}
-                          onChange={(e) => updateTestCase(index, "description", e.target.value)}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor={`test-expect-${index}`}>Expected Outcome</Label>
-                        <Input
-                          id={`test-expect-${index}`}
-                          placeholder="e.g., button is in the document with correct text"
-                          value={testCase.expectation}
-                          onChange={(e) => updateTestCase(index, "expectation", e.target.value)}
-                        />
-                      </div>
                     </div>
-                  ))}
-                </div>
+
+                    {testCases.map((testCase, index) => (
+                      <div key={index} className="space-y-4 p-4 border rounded-md relative">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="absolute top-2 right-2 h-8 w-8"
+                          onClick={() => removeTestCase(index)}
+                        >
+                          <Trash className="h-4 w-4" />
+                        </Button>
+
+                        <div className="space-y-2">
+                          <Label htmlFor={`test-desc-${index}`}>Test Description</Label>
+                          <Input
+                            id={`test-desc-${index}`}
+                            placeholder="e.g., should render the button correctly"
+                            value={testCase.description}
+                            onChange={(e) => updateTestCase(index, "description", e.target.value)}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor={`test-expect-${index}`}>Expected Outcome</Label>
+                          <Input
+                            id={`test-expect-${index}`}
+                            placeholder="e.g., button is in the document with correct text"
+                            value={testCase.expectation}
+                            onChange={(e) => updateTestCase(index, "expectation", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </CardContent>
             <CardFooter>
@@ -813,12 +971,12 @@ describe('${componentToTest.split("/").pop()}', () => {
                 onClick={handleGenerate}
                 disabled={
                   (!componentToTest.trim() && !selectedSpecificationId) ||
-                  (testCases.some((tc) => !tc.description.trim()) && !selectedSpecificationId) ||
+                  (!useAI && testCases.some((tc) => !tc.description.trim()) && !selectedSpecificationId) ||
                   isGenerating
                 }
                 className="gap-2"
               >
-                <TestTube className="h-4 w-4" />
+                {useAI ? <Sparkles className="h-4 w-4 text-yellow-500" /> : <TestTube className="h-4 w-4" />}
                 {isGenerating ? "Generating..." : "Generate Tests"}
               </Button>
             </CardFooter>
