@@ -1,11 +1,7 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
-// Set explicit configuration with valid maxDuration for Hobby plan
-export const config = {
-  maxDuration: 60, // Maximum allowed for Hobby plan (in seconds)
-}
-
-export async function POST(request: NextRequest) {
+// Simple route handler without any configuration
+export async function POST(request) {
   try {
     const { code, fileName, language, framework, requirements } = await request.json()
 
