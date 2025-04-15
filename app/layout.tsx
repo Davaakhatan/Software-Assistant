@@ -5,15 +5,9 @@ import { MainNav } from "@/components/main-nav"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AISettings } from "@/components/ai-settings"
 import { Toaster } from "@/components/ui/toaster"
-import dynamic from "next/dynamic"
+import { AIProviderWrapper } from "@/components/ai-provider-wrapper"
 
 const inter = Inter({ subsets: ["latin"] })
-
-// Dynamically import AIProviderContextProvider to ensure it's client-side only
-const AIProviderContextProvider = dynamic(
-  () => import("@/context/ai-provider-context").then((mod) => mod.AIProviderContextProvider),
-  { ssr: false },
-)
 
 export const metadata = {
   title: "AI-Powered SDLC Companion",
@@ -26,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <AIProviderContextProvider>
+          <AIProviderWrapper>
             <div className="flex min-h-screen flex-col">
               <header className="sticky top-0 z-40 border-b bg-background">
                 <div className="container flex h-16 items-center">
@@ -37,7 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <AISettings />
             <Toaster />
-          </AIProviderContextProvider>
+          </AIProviderWrapper>
         </ThemeProvider>
       </body>
     </html>
