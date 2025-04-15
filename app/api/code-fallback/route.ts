@@ -1,7 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server"
 
-// Set the correct maxDuration for Hobby plan (between 1 and 60 seconds)
-export const runtime = "edge" // This removes the maxDuration issue as Edge functions have different limits
+// Set explicit configuration with valid maxDuration for Hobby plan
+export const config = {
+  maxDuration: 60, // Maximum allowed for Hobby plan (in seconds)
+}
 
 export async function POST(request: NextRequest) {
   try {
