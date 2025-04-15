@@ -3,11 +3,17 @@ import "@/app/globals.css"
 import { Inter } from "next/font/google"
 import { MainNav } from "@/components/main-nav"
 import { ThemeProvider } from "@/components/theme-provider"
-import { AIProviderContextProvider } from "@/context/ai-provider-context"
 import { AISettings } from "@/components/ai-settings"
 import { Toaster } from "@/components/ui/toaster"
+import dynamic from "next/dynamic"
 
 const inter = Inter({ subsets: ["latin"] })
+
+// Dynamically import AIProviderContextProvider to ensure it's client-side only
+const AIProviderContextProvider = dynamic(
+  () => import("@/context/ai-provider-context").then((mod) => mod.AIProviderContextProvider),
+  { ssr: false },
+)
 
 export const metadata = {
   title: "AI-Powered SDLC Companion",
