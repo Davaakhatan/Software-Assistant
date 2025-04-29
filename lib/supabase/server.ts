@@ -1,7 +1,38 @@
 import { createClient } from "@supabase/supabase-js"
+import { cookies } from "next/headers"
 
-// Create a single supabase client for server-side operations
-const supabaseUrl = process.env.SUPABASE_URL!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY!
+// Create a server-side Supabase client
+export function getSupabaseServer() {
+  const cookieStore = cookies()
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+  const supabaseKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-export const supabaseServer = createClient(supabaseUrl, supabaseServiceKey)
+  if (!supabaseUrl || !supabaseKey) {
+    console.error("Missing Supabase environment variables")
+    throw new Error("Missing Supabase environment variables")
+  }
+
+  return createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: false,
+    },
+    // Add connection pooling for better performance
+    db: {
+      schema: "public",
+    },
+    global: {
+      headers: {
+        "x-application-name": "sdlc-companion",
+      },
+    },
+  })
+}
+
+// For backward compatibility
+export const supabaseServer = getSupabaseServer()
+
+// Export createServerClient for use in server actions
+export const createServerClient = getSupabaseServer

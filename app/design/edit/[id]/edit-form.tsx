@@ -10,6 +10,8 @@ import { Save } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { updateDesign } from "../../actions"
 import MermaidDiagram from "@/components/mermaid-diagram"
+import MermaidDiagramComponent from "@/components/mermaid-diagram-component"
+import MermaidDiagramArchitecture from "@/components/mermaid-diagram-architecture"
 import { useRouter } from "next/navigation"
 
 export default function EditDesignForm({ design, requirements }) {
@@ -91,7 +93,13 @@ export default function EditDesignForm({ design, requirements }) {
 
           <div>
             <div className="text-sm font-medium mb-2">Preview:</div>
-            <MermaidDiagram code={diagramCode} className="h-[400px] overflow-auto" />
+            {design.type === "architecture" ? (
+              <MermaidDiagramArchitecture code={diagramCode} className="h-[400px] overflow-auto" />
+            ) : design.type === "data-model" ? (
+              <MermaidDiagram code={diagramCode} className="h-[400px] overflow-auto" />
+            ) : (
+              <MermaidDiagramComponent code={diagramCode} className="h-[400px] overflow-auto" />
+            )}
           </div>
         </div>
       </CardContent>

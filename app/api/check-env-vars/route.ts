@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server"
 
 export async function GET() {
-  // Check if any DeepSeek environment variable exists
-  // Using a more generic approach without directly referencing the variable name
-  const hasDeepseekEnvVar = Object.keys(process.env).some((key) => key.includes("DEEPSEEK") && key.includes("API_KEY"))
-
-  // Return the result without exposing the actual value
   return NextResponse.json({
-    hasDeepseekEnvVar,
+    hasOpenAiKey: !!process.env.OPENAI_API_KEY,
+    hasDeepseekKey: !!process.env.DEEPSEEK_API_KEY,
+    hasSupabaseUrl: !!process.env.SUPABASE_URL,
+    hasSupabaseAnonKey: !!process.env.SUPABASE_ANON_KEY,
   })
 }

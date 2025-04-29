@@ -1,19 +1,14 @@
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    // Parse the request body
     const { prompt, systemPrompt, temperature, apiKey } = await request.json()
 
-    // Validate API key
-    if (!apiKey || typeof apiKey !== "string" || !apiKey.startsWith("sk-")) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Invalid API key",
-        },
-        { status: 400 },
-      )
+    // Use the API key from the request or fall back to environment variable
+    const effectiveApiKey = apiKey || process.env.OPENAI_API_KEY
+
+    if (!effectiveApiKey || !effectiveApiKey.startsWith("sk-")) {
+      return NextResponse.json({ success: false, error: "OpenAI API key is missing or invalid" }, { status: 400 })
     }
 
     // Validate prompt
@@ -38,7 +33,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${effectiveApiKey}`,
       },
       body: JSON.stringify({
         model: "gpt-3.5-turbo-16k",
@@ -80,12 +75,9 @@ export async function POST(request: Request) {
       text: data.choices[0].message.content,
     })
   } catch (error) {
-    console.error("OpenAI generation error:", error)
+    console.error("Error in generate-specification route:", error)
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      },
+      { success: false, error: error instanceof Error ? error.message : "An unexpected error occurred" },
       { status: 500 },
     )
   }

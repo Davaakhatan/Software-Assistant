@@ -2,11 +2,7 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Sparkles, FileText, Code, TestTube, GitBranch, FileCode } from "lucide-react"
-import dynamic from "next/dynamic"
-
-const AISettings = dynamic(() => import("@/components/ai-settings").then((mod) => mod.AISettings), {
-  ssr: false,
-})
+import { AISettings } from "@/components/ai-settings"
 
 export default function HomePage() {
   return (

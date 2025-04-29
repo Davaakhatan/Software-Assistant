@@ -1,192 +1,121 @@
 "use server"
-
-import { createServerComponentClient } from "@supabase/auth-helpers-nextjs"
-import { cookies } from "next/headers"
 import { getSupabaseServer } from "@/lib/supabase-server"
+import { revalidatePath } from "next/cache"
 
-export async function createRequirementForSpecification(specificationId: string, projectName: string) {
+// Type for the system architecture data
+interface SystemArchitectureData {
+  type: string
+  diagramCode: string
+  requirementId: string
+}
+
+// Function to save a system architecture
+export async function saveSystemArchitecture(data: SystemArchitectureData) {
   try {
-    // Use the server-side Supabase client to bypass RLS
+    // Use the server-side Supabase client with service role key
     const supabase = getSupabaseServer()
 
-    // Check if a requirement already exists for this specification
-    const { data: existingReq, error: existingReqError } = await supabase
-      .from("requirements")
-      .select("id")
-      .eq("specification_id", specificationId)
-      .maybeSingle()
-
-    if (existingReqError) {
-      console.error("Error checking for existing requirement:", existingReqError)
-      return { success: false, error: existingReqError.message }
+    // Insert the design into the database
+    const insertData = {
+      type: data.type,
+      diagram_code: data.diagramCode,
+      requirement_id: data.requirementId,
     }
 
-    if (existingReq) {
-      // Use existing requirement
-      return { success: true, requirementId: existingReq.id }
-    } else {
-      // Create a new requirement linked to this specification
-      const { data: newReq, error: newReqError } = await supabase
-        .from("requirements")
-        .insert({
-          project_name: projectName,
-          project_description: `Auto-generated from specification: ${projectName}`,
-          specification_id: specificationId,
-        })
-        .select()
+    const { data: design, error } = await supabase.from("designs").insert(insertData).select()
 
-      if (newReqError) {
-        console.error("Error creating new requirement:", newReqError)
-        return { success: false, error: newReqError.message }
+    if (error) {
+      console.error("Error saving system architecture:", error)
+
+      // Check if this is an authentication error
+      if (error.message && error.message.includes("auth")) {
+        return {
+          success: false,
+          error: "User not authenticated",
+        }
       }
 
-      return { success: true, requirementId: newReq[0].id }
+      return {
+        success: false,
+        error: error.message,
+      }
+    }
+
+    // Revalidate the path to update the UI
+    revalidatePath("/design/system-architecture")
+
+    return {
+      success: true,
+      designId: design?.[0]?.id,
     }
   } catch (error) {
-    console.error("Error in createRequirementForSpecification:", error)
-    return { success: false, error: error.message || "An unexpected error occurred" }
+    console.error("Error in saveSystemArchitecture:", error)
+    return {
+      success: false,
+      error: error.message,
+    }
   }
 }
 
-export async function saveSystemArchitecture({ type, diagramCode, requirementId }) {
+// Function to create a requirement for a specification
+export async function createRequirementForSpecification(specificationId: string, projectName: string) {
   try {
-    // Use the server-side Supabase client to bypass RLS
+    // Use the server-side Supabase client with service role key
     const supabase = getSupabaseServer()
 
-    // Get the current user
-    const authClient = createServerComponentClient({ cookies })
-    const {
-      data: { user },
-    } = await authClient.auth.getUser()
+    // Check if a requirement already exists for this specification
+    const { data: existingRequirements, error: fetchError } = await supabase
+      .from("requirements")
+      .select("id")
+      .eq("specification_id", specificationId)
+      .limit(1)
 
-    // For development: use a default user ID if no user is authenticated
-    const userId = user?.id || "00000000-0000-0000-0000-000000000000" // Default user ID for development
-
-    // Log authentication status for debugging
-    if (!user) {
-      console.log("No authenticated user found. Using default user ID for development.")
-    }
-
-    // Get the project name from the requirement or specification
-    let projectName = "Unknown Project"
-
-    if (requirementId) {
-      const { data: requirement, error: reqError } = await supabase
-        .from("requirements")
-        .select("project_name, specification_id")
-        .eq("id", requirementId)
-        .single()
-
-      if (!reqError && requirement) {
-        projectName = requirement.project_name
-
-        // If there's a specification_id, try to get the app_name from there
-        if (requirement.specification_id && (projectName === "Unknown Project" || !projectName)) {
-          const { data: spec, error: specError } = await supabase
-            .from("specifications")
-            .select("app_name")
-            .eq("id", requirement.specification_id)
-            .single()
-
-          if (!specError && spec && spec.app_name) {
-            projectName = spec.app_name
-            console.log("Using app_name from specification:", projectName)
-          }
-        }
+    if (fetchError) {
+      console.error("Error fetching existing requirements:", fetchError)
+      return {
+        success: false,
+        error: fetchError.message,
       }
     }
 
-    // Try a simple insert with minimal fields first
-    const insertData = {
-      diagram_code: diagramCode,
-      type: type || "architecture",
-      requirement_id: requirementId,
-      project_name: projectName, // Add the project name
+    // If a requirement exists, return its ID
+    if (existingRequirements && existingRequirements.length > 0) {
+      return {
+        success: true,
+        requirementId: existingRequirements[0].id,
+      }
     }
 
-    console.log("Saving system architecture with project name:", projectName)
-
-    // Try to insert with just the minimal fields
-    const { data, error } = await supabase.from("designs").insert(insertData).select()
+    // Otherwise, create a new requirement
+    const { data: requirement, error } = await supabase
+      .from("requirements")
+      .insert({
+        project_name: `System Architecture for ${projectName}`,
+        project_description: `System architecture design for ${projectName}`,
+        status: "completed",
+        priority: "medium",
+        specification_id: specificationId,
+      })
+      .select()
 
     if (error) {
-      console.error("Error with minimal insert:", error)
-
-      // If the error is about the table not existing, try to create it
-      if (error.message.includes("relation") && error.message.includes("does not exist")) {
-        console.log("Designs table doesn't exist. Creating it...")
-
-        // Create the designs table with minimal required columns
-        const createTableQuery = `
-          CREATE TABLE IF NOT EXISTS designs (
-            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-            diagram_code TEXT NOT NULL,
-            type TEXT,
-            project_name TEXT,
-            requirement_id UUID,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-          );
-        `
-
-        const { error: createError } = await supabase.rpc("exec_sql", { sql: createTableQuery })
-
-        if (createError) {
-          console.error("Error creating table:", createError)
-
-          // If we can't create the table with RPC, try a direct insert again
-          // This might work if the table was created by another process in the meantime
-          const { data: retryData, error: retryError } = await supabase.from("designs").insert(insertData).select()
-
-          if (retryError) {
-            return {
-              success: false,
-              error: `Failed to save design: ${retryError.message}. Table creation also failed: ${createError.message}`,
-            }
-          }
-
-          return { success: true, data: retryData }
-        }
-
-        // Try the insert again after creating the table
-        const { data: newData, error: newError } = await supabase.from("designs").insert(insertData).select()
-
-        if (newError) {
-          return { success: false, error: `Table created but insert failed: ${newError.message}` }
-        }
-
-        return { success: true, data: newData }
+      console.error("Error creating requirement:", error)
+      return {
+        success: false,
+        error: error.message,
       }
-
-      // If the error is about a missing column, try a more basic approach
-      if (
-        error.message.includes("column") &&
-        (error.message.includes("user_id") || error.message.includes("requirement_id"))
-      ) {
-        console.log("Column error detected. Trying simplified insert...")
-
-        // Try an even more minimal insert
-        const { data: basicData, error: basicError } = await supabase
-          .from("designs")
-          .insert({
-            diagram_code: diagramCode,
-            project_name: projectName, // Still include the project name
-          })
-          .select()
-
-        if (basicError) {
-          return { success: false, error: `Simplified insert also failed: ${basicError.message}` }
-        }
-
-        return { success: true, data: basicData }
-      }
-
-      return { success: false, error: error.message }
     }
 
-    return { success: true, data }
+    return {
+      success: true,
+      requirementId: requirement[0].id,
+    }
   } catch (error) {
-    console.error("Error in saveSystemArchitecture:", error)
-    return { success: false, error: error.message || "An unexpected error occurred" }
+    console.error("Error in createRequirementForSpecification:", error)
+    return {
+      success: false,
+      error: error.message,
+    }
   }
 }
 
@@ -241,13 +170,13 @@ export async function executeSql(sql: string) {
     const functionName = `temp_exec_${Math.random().toString(36).substring(2, 15)}`
 
     const createFunctionSql = `
-      CREATE OR REPLACE FUNCTION ${functionName}()
-      RETURNS VOID AS $
-      BEGIN
-        ${sql}
-      END;
-      $ LANGUAGE plpgsql SECURITY DEFINER;
-    `
+    CREATE OR REPLACE FUNCTION ${functionName}()
+    RETURNS VOID AS $
+    BEGIN
+      ${sql}
+    END;
+    $ LANGUAGE plpgsql SECURITY DEFINER;
+  `
 
     // Create the function
     const { error: createError } = await supabase.rpc("exec_sql", { sql: createFunctionSql })

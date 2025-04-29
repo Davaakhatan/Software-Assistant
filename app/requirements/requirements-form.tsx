@@ -15,7 +15,7 @@ import { getSpecifications } from "../specification-generator/actions"
 export default function RequirementsForm() {
   const { toast } = useToast()
   const [projectName, setProjectName] = useState("")
-  const [projectDescription, setProjectDescription] = useState("")
+  const [project_description, setProjectDescription] = useState("")
   const [userStories, setUserStories] = useState([{ role: "", action: "", benefit: "", priority: "medium" }])
   const [functionalRequirements, setFunctionalRequirements] = useState([{ description: "", priority: "medium" }])
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -197,7 +197,7 @@ export default function RequirementsForm() {
 
       const formData = {
         projectName,
-        projectDescription,
+        project_description,
         userStories: validUserStories,
         functionalRequirements: validFunctionalRequirements,
         specificationId: selectedSpecId || null, // Link to specification if selected
@@ -289,7 +289,7 @@ export default function RequirementsForm() {
               id="project-description"
               placeholder="Describe your project"
               rows={4}
-              value={projectDescription}
+              value={project_description}
               onChange={(e) => setProjectDescription(e.target.value)}
               required
             />

@@ -1,7 +1,6 @@
 "use client"
 
 import { Checkbox } from "@/components/ui/checkbox"
-
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,15 +9,19 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { Download, FileText } from "lucide-react"
+import { Download, FileText, Info } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
 import { getDesigns } from "../design/actions"
-import { getSupabase } from "@/lib/supabase"
 import { saveDocumentation } from "./actions"
+import { generateAIText } from "@/lib/ai-service"
+import { getRequirements } from "../requirements/actions"
+import { getGeneratedCode } from "../code-generation/actions"
+import { useAIProvider } from "@/context/ai-provider-context"
 
 export default function DocumentationGenerator() {
   const { toast } = useToast()
+  const { provider, temperature } = useAIProvider()
   const [docType, setDocType] = useState("api")
   const [projectName, setProjectName] = useState("")
   const [projectDescription, setProjectDescription] = useState("")
@@ -35,19 +38,29 @@ export default function DocumentationGenerator() {
   })
   const [generatedDocs, setGeneratedDocs] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [activeTab, setActiveTab] = useState("config")
   const [documentationType, setDocumentationType] = useState("user")
   const [documentationContent, setDocumentationContent] = useState("")
-  const [isSaving, setIsSaving] = useState(false)
   const [documentationName, setDocumentationName] = useState("")
 
-  // Added for integration with specifications and designs
+  const [aiPrompt, setAiPrompt] = useState("")
+  const [isAiGenerating, setIsAiGenerating] = useState(false)
+  const [showAiPrompt, setShowAiPrompt] = useState(false)
+
+  // Project selection states
   const [specificationsList, setSpecificationsList] = useState([])
-  const [selectedSpecificationId, setSelectedSpecificationId] = useState("")
-  const [isLoadingSpecifications, setIsLoadingSpecifications] = useState(true)
+  const [requirementsList, setRequirementsList] = useState([])
   const [designsList, setDesignsList] = useState([])
+  const [codeList, setCodeList] = useState([])
+  const [selectedSpecificationId, setSelectedSpecificationId] = useState("")
+  const [selectedRequirementId, setSelectedRequirementId] = useState("")
   const [selectedDesignId, setSelectedDesignId] = useState("")
-  const [isLoadingDesigns, setIsLoadingDesigns] = useState(false)
+  const [selectedCodeId, setSelectedCodeId] = useState("")
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true)
+  const [projectContext, setProjectContext] = useState("")
+  const [relatedDesigns, setRelatedDesigns] = useState([])
+  const [relatedCode, setRelatedCode] = useState([])
 
   const handleSectionChange = (section, checked) => {
     setSections({
@@ -56,77 +69,209 @@ export default function DocumentationGenerator() {
     })
   }
 
-  // Fetch specifications list on component mount
+  // Fetch projects data on component mount
   useEffect(() => {
-    const fetchSpecifications = async () => {
+    const fetchProjectsData = async () => {
+      setIsLoadingProjects(true)
       try {
-        const result = await getSpecifications()
-        if (result.success) {
-          setSpecificationsList(result.data || [])
-        } else {
-          console.error("Failed to load specifications:", result.error)
+        // Fetch specifications
+        const specificationsResult = await getSpecifications()
+        if (specificationsResult.success) {
+          setSpecificationsList(specificationsResult.data || [])
+        }
+
+        // Fetch requirements
+        const requirementsResult = await getRequirements()
+        if (requirementsResult.success) {
+          setRequirementsList(requirementsResult.data || [])
+        }
+
+        // Fetch designs
+        const designsResult = await getDesigns()
+        if (designsResult.success) {
+          setDesignsList(designsResult.data || [])
+        }
+
+        // Fetch generated code
+        const codeResult = await getGeneratedCode()
+        if (codeResult.success) {
+          setCodeList(codeResult.data || [])
         }
       } catch (error) {
-        console.error("Error fetching specifications:", error)
+        console.error("Error fetching projects data:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load projects data.",
+          variant: "destructive",
+        })
       } finally {
-        setIsLoadingSpecifications(false)
+        setIsLoadingProjects(false)
       }
     }
 
-    fetchSpecifications()
-  }, [])
+    fetchProjectsData()
+  }, [toast])
 
-  // Fetch designs when a specification is selected
+  // Update project context when specification is selected
   useEffect(() => {
-    const fetchDesigns = async () => {
-      if (!selectedSpecificationId) {
-        setDesignsList([])
-        return
-      }
+    if (selectedSpecificationId) {
+      const specification = specificationsList.find((spec) => spec.id === selectedSpecificationId)
+      if (specification) {
+        setProjectName(specification.app_name || "")
+        setProjectDescription(specification.app_description || "")
+        setDocumentationName(specification.app_name || "")
 
-      setIsLoadingDesigns(true)
-      try {
-        // First, find a requirement linked to this specification
-        const supabase = getSupabase()
-        const { data: requirement, error: requirementError } = await supabase
-          .from("requirements")
-          .select("id")
-          .eq("specification_id", selectedSpecificationId)
-          .maybeSingle()
+        // Find related requirement
+        const relatedRequirement = requirementsList.find((req) => req.specification_id === selectedSpecificationId)
+        if (relatedRequirement) {
+          setSelectedRequirementId(relatedRequirement.id)
 
-        if (requirementError || !requirement) {
-          // No linked requirement found, so no designs
-          setDesignsList([])
-          return
+          // Find related designs
+          const designs = designsList.filter((design) => design.requirement_id === relatedRequirement.id)
+          setRelatedDesigns(designs)
+
+          // Find related code
+          const code = codeList.filter((code) => code.requirement_id === relatedRequirement.id)
+          setRelatedCode(code)
+
+          // Build project context for AI
+          let context = `Specification: ${specification.app_name}
+${specification.app_description || ""}`
+          context += `
+
+Requirement: ${relatedRequirement.project_name}
+${relatedRequirement.project_description || ""}`
+
+          if (designs.length > 0) {
+            context += `
+
+Designs:`
+            designs.forEach((design) => {
+              context += `
+- ${design.type || "Untitled Design"}: ${design.description || ""}`
+            })
+          }
+
+          if (code.length > 0) {
+            context += `
+
+Implemented Code:`
+            code.forEach((c) => {
+              context += `
+- ${c.language || "Untitled Code"}: ${c.requirements || ""}`
+            })
+          }
+
+          setProjectContext(context)
         }
-
-        // Now get designs for this requirement
-        const result = await getDesigns()
-        if (result.success) {
-          // Filter designs to only include those for this requirement
-          const filteredDesigns = result.data.filter(
-            (design) => design.project_id && requirement.id === design.requirement_id,
-          )
-          setDesignsList(filteredDesigns || [])
-        } else {
-          console.error("Failed to load designs:", result.error)
-        }
-      } catch (error) {
-        console.error("Error fetching designs:", error)
-      } finally {
-        setIsLoadingDesigns(false)
       }
     }
+  }, [selectedSpecificationId, specificationsList, requirementsList, designsList, codeList])
 
-    fetchDesigns()
-  }, [selectedSpecificationId])
+  // Update selected design context
+  useEffect(() => {
+    if (selectedDesignId) {
+      const design = designsList.find((d) => d.id === selectedDesignId)
+      if (design) {
+        // Add design details to documentation name if not already set from specification
+        if (!documentationName && design.type) {
+          setDocumentationName(design.type)
+        }
+      }
+    }
+  }, [selectedDesignId, designsList, documentationName])
 
-  // Function to generate documentation from specification
+  const handleAiGenerate = async () => {
+    if (!projectName.trim()) {
+      toast({
+        title: "Missing information",
+        description: "Please provide a project name or select a specification.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsGenerating(true)
+    setIsAiGenerating(true)
+    setActiveTab("preview")
+
+    try {
+      // Construct a prompt based on the selected sections and documentation type
+      const sectionsText = Object.entries(sections)
+        .filter(([_, included]) => included)
+        .map(([section]) => {
+          // Convert camelCase to readable format
+          return section.replace(/([A-Z])/g, " $1").toLowerCase()
+        })
+        .join(", ")
+
+      // Build the prompt with project context if available
+      let contextPrompt = `Generate comprehensive ${docType} documentation for a project named "${projectName}".
+     
+     Project description: ${projectDescription || "A software project"}
+     
+     Include the following sections: ${sectionsText}`
+
+      if (projectContext) {
+        contextPrompt += `
+
+Project context:
+${projectContext}`
+      }
+
+      if (aiPrompt.trim()) {
+        contextPrompt += `
+
+Additional requirements: ${aiPrompt}`
+      }
+
+      contextPrompt += `
+
+Format the documentation in Markdown.`
+
+      const result = await generateAIText(
+        contextPrompt,
+        "You are a technical writer who creates clear, comprehensive software documentation.",
+        {
+          provider,
+          temperature,
+        },
+      )
+
+      if (result.success && result.text) {
+        setGeneratedDocs(result.text)
+        setDocumentationContent(result.text)
+
+        toast({
+          title: "Documentation generated",
+          description: "AI-generated documentation is ready for review.",
+        })
+      } else {
+        toast({
+          title: "AI generation failed",
+          description: result.error || "Failed to generate documentation. Please try again.",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error in AI documentation generation:", error)
+      toast({
+        title: "Error",
+        description: "An unexpected error occurred during AI generation.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGenerating(false)
+      setIsAiGenerating(false)
+    }
+  }
+
   const generateFromSpecification = async () => {
     if (!selectedSpecificationId) {
       toast({
         title: "Error",
         description: "Please select a specification to generate documentation from.",
+        variant: "destructive",
       })
       return
     }
@@ -137,16 +282,50 @@ export default function DocumentationGenerator() {
     try {
       const result = await getSpecificationById(selectedSpecificationId)
       if (result.success && result.data) {
-        // Simulate documentation generation delay
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-
-        // Generate documentation content based on the specification
         const specification = result.data
-        const generatedContent = `# ${specification.title} Documentation
+
+        // Use AI to generate documentation based on the specification and context
+        let aiPrompt = `Generate comprehensive documentation based on the following software specification:
+     
+     Title: ${specification.app_name}
+     Description: ${specification.app_description}
+     Use Cases: ${specification.use_cases}
+     Acceptance Criteria: ${specification.acceptance_criteria}`
+
+        if (projectContext) {
+          aiPrompt += `
+
+Additional project context:
+${projectContext}`
+        }
+
+        aiPrompt += `
+
+Format the documentation in Markdown with appropriate sections including Overview, Features, Installation, Usage, and API Reference if applicable.`
+
+        const aiResult = await generateAIText(
+          aiPrompt,
+          "You are a technical writer who creates clear, comprehensive software documentation based on specifications.",
+          {
+            provider,
+            temperature,
+          },
+        )
+
+        if (aiResult.success && aiResult.text) {
+          setGeneratedDocs(aiResult.text)
+          setDocumentationContent(aiResult.text)
+          toast({
+            title: "Documentation generated",
+            description: "AI-generated documentation from specification is ready for review.",
+          })
+        } else {
+          // Fallback to template-based generation if AI fails
+          const generatedContent = `# ${specification.app_name} Documentation
 
 ## Overview
 
-${specification.description}
+${specification.app_description}
 
 ### Use Cases
 
@@ -156,16 +335,19 @@ ${specification.use_cases}
 
 ${specification.acceptance_criteria}
 `
-        setGeneratedDocs(generatedContent)
-        toast({
-          title: "Documentation generated",
-          description: "Documentation generated from specification successfully.",
-        })
+          setGeneratedDocs(generatedContent)
+          setDocumentationContent(generatedContent)
+          toast({
+            title: "Documentation generated",
+            description: "Documentation generated from specification successfully.",
+          })
+        }
       } else {
         console.error("Failed to load specification:", result.error)
         toast({
           title: "Error",
           description: "Failed to generate documentation from specification.",
+          variant: "destructive",
         })
       }
     } catch (error) {
@@ -173,6 +355,7 @@ ${specification.acceptance_criteria}
       toast({
         title: "Error",
         description: "An error occurred while generating documentation.",
+        variant: "destructive",
       })
     } finally {
       setIsGenerating(false)
@@ -184,17 +367,46 @@ ${specification.acceptance_criteria}
       toast({
         title: "Error",
         description: "Please enter a documentation name.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!generatedDocs || !generatedDocs.trim()) {
+      toast({
+        title: "Error",
+        description: "Please generate documentation content first.",
+        variant: "destructive",
       })
       return
     }
 
     setIsSaving(true)
     try {
-      const result = await saveDocumentation({
+      // IMPORTANT: For this attempt, let's try saving WITHOUT a specification ID
+      // This should avoid the foreign key constraint issue entirely
+
+      console.log("About to save documentation with params:", {
         name: documentationName,
-        type: documentationType,
-        content: generatedDocs,
+        documentationType: documentationType || "user",
+        contentLength: generatedDocs?.length || 0,
+        specificationId: null, // Force to null for this attempt
+        projectDescription: projectDescription || "No description provided",
       })
+
+      // Create a simple object to test saving
+      const testObj = {
+        name: documentationName,
+        documentationType: documentationType || "user",
+        documentationContent: generatedDocs,
+        specificationId: null, // Force to null for this attempt
+        designId: null,
+        codeId: null,
+        projectDescription: projectDescription || "No description provided",
+      }
+
+      // Try to save with the updated column names
+      const result = await saveDocumentation(testObj)
 
       if (result.success) {
         toast({
@@ -202,16 +414,19 @@ ${specification.acceptance_criteria}
           description: "Your documentation has been saved successfully.",
         })
       } else {
+        console.error("Save documentation error:", result.error)
         toast({
           title: "Error",
-          description: "Failed to save documentation.",
+          description: `Failed to save documentation: ${result.error || "Unknown error"}`,
+          variant: "destructive",
         })
       }
     } catch (error) {
       console.error("Error saving documentation:", error)
       toast({
         title: "Error",
-        description: "An error occurred while saving documentation.",
+        description: `An error occurred while saving documentation: ${error?.message || "Unknown error"}`,
+        variant: "destructive",
       })
     } finally {
       setIsSaving(false)
@@ -219,7 +434,30 @@ ${specification.acceptance_criteria}
   }
 
   const handleDownload = () => {
-    // In a real app, this would download the generated documentation
+    if (!generatedDocs) {
+      toast({
+        title: "Error",
+        description: "No documentation to download.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Create a blob with the documentation content
+    const blob = new Blob([generatedDocs], { type: "text/markdown" })
+    const url = URL.createObjectURL(blob)
+
+    // Create a temporary link and trigger download
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `${documentationName || "documentation"}.md`
+    document.body.appendChild(a)
+    a.click()
+
+    // Clean up
+    URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+
     toast({
       title: "Documentation downloaded",
       description: "Your documentation has been downloaded as Markdown.",
@@ -324,30 +562,6 @@ Retrieves a list of users.
     // ...
   ],
   "total": 100
-}
-\`\`\`
-
-#### POST /api/users
-
-Creates a new user.
-
-**Request Body:**
-
-\`\`\`json
-{
-  "name": "Jane Doe",
-  "email": "jane@example.com",
-  "password": "securepassword"
-}
-\`\`\`
-
-**Response:**
-
-\`\`\`json
-{
-  "id": "2",
-  "name": "Jane Doe",
-  "email": "jane@example.com"
 }
 \`\`\``
     : `### Components
@@ -465,6 +679,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 }`
 
     setGeneratedDocs(sampleDocs)
+    setDocumentationContent(sampleDocs)
     setIsGenerating(false)
 
     toast({
@@ -488,6 +703,78 @@ This project is licensed under the MIT License - see the LICENSE file for detail
               <CardDescription>Configure your documentation generation</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* Project Selection */}
+              <div className="space-y-4">
+                <Label>Select Project</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="specification-select">Specification</Label>
+                  <Select
+                    value={selectedSpecificationId}
+                    onValueChange={setSelectedSpecificationId}
+                    disabled={isLoadingProjects}
+                  >
+                    <SelectTrigger id="specification-select">
+                      <SelectValue placeholder={isLoadingProjects ? "Loading..." : "Select a specification"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {specificationsList.map((spec) => (
+                        <SelectItem key={spec.id} value={spec.id}>
+                          {spec.app_name || "Untitled Specification"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {relatedDesigns.length > 0 && (
+                  <div className="space-y-2">
+                    <Label htmlFor="design-select">Design (Optional)</Label>
+                    <Select value={selectedDesignId} onValueChange={setSelectedDesignId}>
+                      <SelectTrigger id="design-select">
+                        <SelectValue placeholder="Select a design (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        {relatedDesigns.map((design) => (
+                          <SelectItem key={design.id} value={design.id}>
+                            {design.title || "Untitled Design"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {relatedCode.length > 0 && (
+                  <div className="space-y-2">
+                    <Label htmlFor="code-select">Implementation (Optional)</Label>
+                    <Select value={selectedCodeId} onValueChange={setSelectedCodeId}>
+                      <SelectTrigger id="code-select">
+                        <SelectValue placeholder="Select code implementation (optional)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        {relatedCode.map((code) => (
+                          <SelectItem key={code.id} value={code.id}>
+                            {code.language || "Untitled Code"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {projectContext && (
+                  <div className="p-3 bg-muted rounded-md text-sm">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Info className="h-4 w-4" />
+                      <p className="font-medium">Project Context</p>
+                    </div>
+                    <p className="whitespace-pre-line">{projectContext}</p>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="doc-type">Documentation Type</Label>
                 <Select value={docType} onValueChange={setDocType}>
@@ -521,6 +808,16 @@ This project is licensed under the MIT License - see the LICENSE file for detail
                   rows={4}
                   value={projectDescription}
                   onChange={(e) => setProjectDescription(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="documentation-name">Documentation Name</Label>
+                <Input
+                  id="documentation-name"
+                  placeholder="e.g., API Reference Guide"
+                  value={documentationName}
+                  onChange={(e) => setDocumentationName(e.target.value)}
                 />
               </div>
 
@@ -620,7 +917,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
                 </div>
               </div>
             </CardContent>
-            <CardFooter>
+            <CardFooter className="flex gap-2">
               <Button
                 onClick={handleGenerate}
                 disabled={!projectName.trim() || !projectDescription.trim() || isGenerating}
@@ -671,10 +968,16 @@ This project is licensed under the MIT License - see the LICENSE file for detail
                 <Button variant="outline" onClick={() => setActiveTab("config")} className="gap-2">
                   Edit Configuration
                 </Button>
-                <Button onClick={handleDownload} className="gap-2">
-                  <Download className="h-4 w-4" />
-                  Download Documentation
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={handleSave} disabled={isSaving} className="gap-2">
+                    <FileText className="h-4 w-4" />
+                    {isSaving ? "Saving..." : "Save Documentation"}
+                  </Button>
+                  <Button onClick={handleDownload} variant="outline" className="gap-2">
+                    <Download className="h-4 w-4" />
+                    Download
+                  </Button>
+                </div>
               </CardFooter>
             )}
           </Card>

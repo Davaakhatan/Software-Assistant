@@ -6,6 +6,8 @@ import { getDesignById } from "../actions"
 import { formatDate } from "@/lib/utils"
 import MermaidDiagram from "@/components/mermaid-diagram"
 import DeleteDesignButtonClient from "./delete-button-client"
+import MermaidDiagramArchitecture from "@/components/mermaid-diagram-architecture"
+import MermaidDiagramComponent from "@/components/mermaid-diagram-component"
 
 export default async function DesignDetails({ params }) {
   const { data: design, success, error } = await getDesignById(params.id)
@@ -81,7 +83,13 @@ export default async function DesignDetails({ params }) {
         </CardHeader>
         <CardContent>
           <div className="mb-6">
-            <MermaidDiagram code={design.diagram_code} className="w-full" />
+            {design.type === "architecture" ? (
+              <MermaidDiagramArchitecture code={design.diagram_code} className="w-full" />
+            ) : design.type === "data-model" ? (
+              <MermaidDiagram code={design.diagram_code} className="w-full" />
+            ) : (
+              <MermaidDiagramComponent code={design.diagram_code} className="w-full" />
+            )}
           </div>
 
           <div className="mt-6">

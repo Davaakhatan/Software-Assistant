@@ -145,7 +145,7 @@ export async function updateRequirements(id, formData) {
     if (formData.functionalRequirements && formData.functionalRequirements.length > 0) {
       const functionalRequirementsWithId = formData.functionalRequirements.map((req) => ({
         requirement_id: id,
-        description: req.description,
+        description: req.project_description,
         priority: req.priority,
       }))
 

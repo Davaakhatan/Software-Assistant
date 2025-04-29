@@ -4,22 +4,27 @@ import { useState, useEffect } from "react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, RefreshCw, Download, Code, FileText, PenTool, FileCode } from "lucide-react"
+import { ArrowLeft, RefreshCw, Download, Code, FileCode, GitBranch, GitPullRequest, BookOpen } from "lucide-react"
 import Link from "next/link"
 import { createClient } from "@supabase/supabase-js"
-import MermaidDiagram from "@/components/mermaid-diagram" // Fixed import
+import MermaidDiagram from "@/components/mermaid-diagram"
 
 // Create a Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// Create a singleton client to avoid multiple instances
+const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: { persistSession: false },
+})
 
 export default function FilesPage() {
-  const [activeTab, setActiveTab] = useState("code")
+  const [activeTab, setActiveTab] = useState("cicd") // Set default tab to CI/CD for testing
   const [files, setFiles] = useState<any[]>([])
   const [selectedFile, setSelectedFile] = useState<any | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [error, setError] = useState<string | null>(null)
 
   // Load files based on the active tab
   useEffect(() => {
@@ -27,18 +32,22 @@ export default function FilesPage() {
       setIsLoading(true)
       setFiles([])
       setSelectedFile(null)
+      setError(null)
 
       try {
         let data: any[] = []
-        let error: any = null
 
         // Fetch different types of files based on the active tab
         if (activeTab === "code") {
           // Fetch code from the code_generations table
           const result = await supabase.from("code_generations").select("*").order("created_at", { ascending: false })
 
+          if (result.error) {
+            console.error("Error fetching code generations:", result.error)
+            throw result.error
+          }
+
           data = result.data || []
-          error = result.error
 
           // Process the data to extract file names from requirements
           data = data.map((item) => {
@@ -54,40 +63,57 @@ export default function FilesPage() {
             }
           })
         } else if (activeTab === "docs") {
-          // Fetch specifications from the specifications table
-          const specResult = await supabase.from("specifications").select("*").order("created_at", { ascending: false })
+          // Fetch documentation from the documentations table
+          const { data: docsData, error: docsError } = await supabase
+            .from("documentations")
+            .select("*")
+            .order("created_at", { ascending: false })
 
-          const specData = specResult.data || []
+          if (docsError) {
+            throw docsError
+          }
 
-          // Fetch designs from the designs table
-          const designResult = await supabase.from("designs").select("*").order("created_at", { ascending: false })
+          data = docsData || []
 
-          const designData = designResult.data || []
+          // Function to fetch app_name from specifications table
+          const fetchAppName = async (projectId) => {
+            if (!projectId) return null
+            const { data: specData, error: specError } = await supabase
+              .from("specifications")
+              .select("app_name")
+              .eq("id", projectId)
+              .single()
 
-          // Process specifications
-          const processedSpecs = specData.map((item) => ({
-            ...item,
-            fileName: `Specification: ${item.app_name || `spec_${item.id}`}`,
-            fileType: "specification",
-            icon: <FileText className="h-4 w-4 mr-2 flex-shrink-0" />,
-          }))
+            if (specError) {
+              console.error("Error fetching specification:", specError)
+              return null
+            }
 
-          // Process designs
-          const processedDesigns = designData.map((item) => ({
-            ...item,
-            fileName: `Design: ${item.type || `design_${item.id}`}`,
-            fileType: "design",
-            icon: <PenTool className="h-4 w-4 mr-2 flex-shrink-0" />,
-          }))
+            return specData?.app_name || null
+          }
 
-          // Combine specifications and designs
-          data = [...processedSpecs, ...processedDesigns]
+          // Process documentation
+          data = await Promise.all(
+            data.map(async (item) => {
+              const appName = await fetchAppName(item.project_id)
+              return {
+                ...item,
+                fileName: `Doc: ${item.project_name || `doc_${item.id}`} (${item.doc_type || "general"})`,
+                fileType: "documentation",
+                icon: <BookOpen className="h-4 w-4 mr-2 flex-shrink-0" />,
+                appName: appName, // Add appName to the item
+              }
+            }),
+          )
         } else if (activeTab === "tests") {
           // Fetch test cases from the test_cases table
           const result = await supabase.from("test_cases").select("*").order("created_at", { ascending: false })
 
+          if (result.error) {
+            throw result.error
+          }
+
           data = result.data || []
-          error = result.error
 
           // Process test cases
           data = data.map((item) => ({
@@ -96,15 +122,57 @@ export default function FilesPage() {
             fileType: "test",
             icon: <FileCode className="h-4 w-4 mr-2 flex-shrink-0" />,
           }))
-        }
+        } else if (activeTab === "cicd") {
+          // Fetch CI/CD pipelines from the ci_cd_pipelines table
+          const { data: pipelineData, error: pipelineError } = await supabase.from("ci_cd_pipelines").select("*")
 
-        if (error) {
-          throw error
+          if (pipelineError) {
+            throw pipelineError
+          }
+
+          data = pipelineData || []
+
+          // Process CI/CD pipelines
+          data = data.map((item) => {
+            // Determine the appropriate icon based on the platform
+            let icon = <GitBranch className="h-4 w-4 mr-2 flex-shrink-0" />
+            if (item.platform === "github") {
+              icon = <GitPullRequest className="h-4 w-4 mr-2 flex-shrink-0" />
+            }
+
+            return {
+              ...item,
+              fileName: `Pipeline: ${item.project_name || `pipeline_${item.id}`} (${item.platform || "unknown"})`,
+              fileType: "cicd",
+              icon: icon,
+            }
+          })
+        } else if (activeTab === "documentation") {
+          // Fetch documentation from the documentations table
+          const { data: docsData, error: docsError } = await supabase
+            .from("documentations")
+            .select("*")
+            .order("created_at", { ascending: false })
+
+          if (docsError) {
+            throw docsError
+          }
+
+          data = docsData || []
+
+          // Process documentation
+          data = data.map((item) => ({
+            ...item,
+            fileName: `Doc: ${item.project_name || `doc_${item.id}`} (${item.doc_type || "general"})`,
+            fileType: "documentation",
+            icon: <BookOpen className="h-4 w-4 mr-2 flex-shrink-0" />,
+          }))
         }
 
         setFiles(data)
-      } catch (error) {
-        console.error(`Error loading ${activeTab} files:`, error)
+      } catch (err: any) {
+        console.error(`Error loading ${activeTab} files:`, err)
+        setError(err.message || "Failed to load files")
       } finally {
         setIsLoading(false)
       }
@@ -207,6 +275,41 @@ export default function FilesPage() {
           )}
         </div>
       )
+    } else if (selectedFile.fileType === "cicd") {
+      return (
+        <div>
+          <div className="mb-4">
+            <h4 className="font-medium mb-1">
+              Platform: <span className="capitalize">{selectedFile.platform || "Unknown"}</span>
+            </h4>
+            <p className="text-sm">Project: {selectedFile.project_name || "Unnamed Project"}</p>
+          </div>
+          <pre className="bg-muted p-4 rounded-md overflow-auto max-h-[600px] text-sm">
+            <code>{selectedFile.generated_config || "No configuration available"}</code>
+          </pre>
+        </div>
+      )
+    } else if (selectedFile.fileType === "documentation") {
+      return (
+        <div className="bg-muted p-4 rounded-md overflow-auto max-h-[600px]">
+          <h3 className="font-medium mb-2">Documentation: {selectedFile.project_name || "Untitled"}</h3>
+          <h4 className="font-medium mb-2">Type: {selectedFile.doc_type || "General"}</h4>
+
+          {selectedFile.project_description && (
+            <div className="mb-4">
+              <h4 className="font-medium mb-1">Project Description:</h4>
+              <p className="text-sm">{selectedFile.project_description}</p>
+            </div>
+          )}
+
+          {selectedFile.generated_docs && (
+            <div>
+              <h4 className="font-medium mb-1">Documentation Content:</h4>
+              <pre className="text-sm whitespace-pre-wrap">{selectedFile.generated_docs}</pre>
+            </div>
+          )}
+        </div>
+      )
     }
 
     return (
@@ -216,25 +319,25 @@ export default function FilesPage() {
     )
   }
 
-  // Function to get download content based on file type
+  // Helper function to get download content based on file type
   const getDownloadContent = () => {
     if (!selectedFile) return { content: "", fileName: "file.txt" }
 
     if (selectedFile.fileType === "code") {
       return {
-        content: selectedFile.generated_code,
-        fileName: selectedFile.fileName,
+        content: selectedFile.generated_code || "// No code available",
+        fileName: selectedFile.fileName || "code.txt",
       }
     } else if (selectedFile.fileType === "design") {
       return {
-        content: selectedFile.diagram_code,
+        content: selectedFile.diagram_code || "// No diagram code available",
         fileName: `${selectedFile.type || "design"}_${selectedFile.id}.mmd`,
       }
     } else if (selectedFile.fileType === "specification") {
       const content = `
-App Name: ${selectedFile.app_name}
-App Type: ${selectedFile.app_type}
-App Description: ${selectedFile.app_description}
+App Name: ${selectedFile.app_name || "Untitled"}
+App Type: ${selectedFile.app_type || "Unknown"}
+App Description: ${selectedFile.app_description || "No description"}
 
 Functional Requirements:
 ${selectedFile.functional_requirements || "N/A"}
@@ -255,8 +358,8 @@ ${selectedFile.database_schema || "N/A"}
       }
     } else if (selectedFile.fileType === "test") {
       const content = `
-Test Name: ${selectedFile.name}
-Description: ${selectedFile.description}
+Test Name: ${selectedFile.name || "Untitled Test"}
+Description: ${selectedFile.description || "No description"}
 
 Test Code:
 ${selectedFile.test_code || "N/A"}
@@ -266,6 +369,29 @@ ${selectedFile.test_code || "N/A"}
         content,
         fileName: `test_${selectedFile.id}.txt`,
       }
+    } else if (selectedFile.fileType === "cicd") {
+      const extension = selectedFile.platform === "github" ? "yml" : "yml"
+      return {
+        content: selectedFile.generated_config || "# No configuration available",
+        fileName: `${selectedFile.project_name || "pipeline"}_${selectedFile.platform || "ci"}.${extension}`,
+      }
+    } else if (selectedFile.fileType === "documentation") {
+      const content = `
+# ${selectedFile.project_name || "Untitled Documentation"}
+Type: ${selectedFile.doc_type || "General"}
+Created: ${new Date(selectedFile.created_at).toLocaleString()}
+
+## Project Description
+${selectedFile.project_description || "No description available"}
+
+## Documentation Content
+${selectedFile.generated_docs || "No content available"}
+      `.trim()
+
+      return {
+        content,
+        fileName: `documentation_${selectedFile.id}.md`,
+      }
     }
 
     return {
@@ -274,8 +400,36 @@ ${selectedFile.test_code || "N/A"}
     }
   }
 
+  const renderFileList = () => {
+    return (
+      <div>
+        {isLoading && <p>Loading files...</p>}
+        {error && (
+          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+            <h4 className="font-medium text-red-800 mb-2">Error</h4>
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
+        {files.map((file) => (
+          <div
+            key={file.id}
+            className="flex items-center justify-between py-2 border-b border-gray-200 last:border-b-0 cursor-pointer hover:bg-gray-50"
+            onClick={() => handleFileSelect(file)}
+          >
+            <div className="flex items-center">
+              {file.icon}
+              <span>{file.fileName}</span>
+            </div>
+            <span className="text-xs text-gray-500">{new Date(file.created_at).toLocaleDateString()}</span>
+          </div>
+        ))}
+        {!isLoading && files.length === 0 && !error && <p>No files found.</p>}
+      </div>
+    )
+  }
+
   return (
-    <div className="container mx-auto px-4 py-12">
+    <div className="container mx-auto py-10">
       <div className="flex items-center justify-between mb-8">
         <Link href="/">
           <Button variant="ghost" className="gap-2">
@@ -283,6 +437,10 @@ ${selectedFile.test_code || "N/A"}
             Back to Dashboard
           </Button>
         </Link>
+        <Button variant="outline" onClick={handleRefresh} disabled={isLoading} className="flex items-center gap-2">
+          <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
       </div>
 
       <div className="flex flex-col items-start mb-8">
@@ -290,22 +448,19 @@ ${selectedFile.test_code || "N/A"}
         <p className="text-muted-foreground">View and manage files for your SDLC project</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           <Card>
             <CardContent className="p-6">
               <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <div className="flex justify-between items-center mb-4">
-                  <TabsList className="grid grid-cols-4">
+                  <TabsList className="grid w-auto" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
                     <TabsTrigger value="code">Code</TabsTrigger>
                     <TabsTrigger value="tests">Tests</TabsTrigger>
-                    <TabsTrigger value="docs">Documentation</TabsTrigger>
-                    <TabsTrigger value="other">Other</TabsTrigger>
+                    <TabsTrigger value="docs">Designs</TabsTrigger>
+                    <TabsTrigger value="cicd">CI/CD</TabsTrigger>
+                    <TabsTrigger value="documentation">Docs</TabsTrigger>
                   </TabsList>
-                  <Button variant="outline" size="sm" onClick={handleRefresh} className="flex items-center gap-1">
-                    <RefreshCw className="h-4 w-4" />
-                    Refresh
-                  </Button>
                 </div>
 
                 <TabsContent value="code">
@@ -324,15 +479,36 @@ ${selectedFile.test_code || "N/A"}
 
                 <TabsContent value="docs">
                   <div>
-                    <h3 className="text-lg font-medium mb-4">Documentation Files</h3>
+                    <h3 className="text-lg font-medium mb-4">Design Files</h3>
                     {renderFileList()}
                   </div>
                 </TabsContent>
 
-                <TabsContent value="other">
+                <TabsContent value="cicd">
                   <div>
-                    <h3 className="text-lg font-medium mb-4">Other Files</h3>
-                    <div className="text-center py-8 text-muted-foreground">Other files will be displayed here</div>
+                    <h3 className="text-lg font-medium mb-4">CI/CD Pipeline Files</h3>
+                    {renderFileList()}
+
+                    {error && (
+                      <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                        <h4 className="font-medium text-red-800 mb-2">Error</h4>
+                        <p className="text-sm text-red-700">{error}</p>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="documentation">
+                  <div>
+                    <h3 className="text-lg font-medium mb-4">Documentation Files</h3>
+                    {renderFileList()}
+
+                    {error && (
+                      <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                        <h4 className="font-medium text-red-800 mb-2">Error</h4>
+                        <p className="text-sm text-red-700">{error}</p>
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
               </Tabs>
@@ -391,81 +567,20 @@ ${selectedFile.test_code || "N/A"}
                   Test Cases
                 </Button>
               </Link>
+              <Link href="/cicd">
+                <Button className="w-full" variant="outline">
+                  CI/CD Pipelines
+                </Button>
+              </Link>
+              <Link href="/documentation">
+                <Button className="w-full" variant="outline">
+                  Documentation
+                </Button>
+              </Link>
             </CardContent>
           </Card>
-
-          {selectedFile && (
-            <Card>
-              <CardHeader>
-                <CardTitle>File Details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <dl className="space-y-2">
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">Type</dt>
-                    <dd className="capitalize">{selectedFile.fileType}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">Created</dt>
-                    <dd>{new Date(selectedFile.created_at).toLocaleString()}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-sm font-medium text-muted-foreground">ID</dt>
-                    <dd className="text-sm font-mono">{selectedFile.id}</dd>
-                  </div>
-                  {selectedFile.fileType === "code" && (
-                    <>
-                      <div>
-                        <dt className="text-sm font-medium text-muted-foreground">Language</dt>
-                        <dd>{selectedFile.language}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-sm font-medium text-muted-foreground">Framework</dt>
-                        <dd>{selectedFile.framework}</dd>
-                      </div>
-                    </>
-                  )}
-                </dl>
-              </CardContent>
-            </Card>
-          )}
         </div>
       </div>
     </div>
   )
-
-  // Helper function to render the file list
-  function renderFileList() {
-    if (isLoading) {
-      return (
-        <div className="flex justify-center py-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        </div>
-      )
-    }
-
-    if (files.length === 0) {
-      return <div className="text-center py-8 text-muted-foreground">No files found</div>
-    }
-
-    return (
-      <ul className="space-y-2">
-        {files.map((file) => (
-          <li key={`${file.fileType}_${file.id}`}>
-            <Button
-              variant="outline"
-              className="w-full justify-start h-auto py-2 px-3 text-left"
-              onClick={() => handleFileSelect(file)}
-            >
-              {file.icon}
-              <span className="truncate">{file.fileName}</span>
-              <span className="ml-auto text-xs text-muted-foreground">
-                {new Date(file.created_at).toLocaleDateString()}
-              </span>
-            </Button>
-          </li>
-        ))}
-      </ul>
-    )
-  }
 }

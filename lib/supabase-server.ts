@@ -1,11 +1,17 @@
 import { createClient } from "@supabase/supabase-js"
+import type { CookieOptions } from "@supabase/supabase-js"
 
-// Create a singleton instance for server-side operations
-let supabaseServerInstance = null
+const cookieOptions: CookieOptions = {
+  name: "sb-auth-token",
+  domain: process.env.NEXT_PUBLIC_DOMAIN,
+  path: "/",
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  httpOnly: true,
+}
 
+// Create a server-side Supabase client
 export function getSupabaseServer() {
-  if (supabaseServerInstance) return supabaseServerInstance
-
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
   const supabaseKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -17,7 +23,7 @@ export function getSupabaseServer() {
     throw new Error("Missing Supabase environment variables")
   }
 
-  supabaseServerInstance = createClient(supabaseUrl, supabaseKey, {
+  return createClient(supabaseUrl, supabaseKey, {
     auth: {
       persistSession: false,
     },
@@ -31,9 +37,13 @@ export function getSupabaseServer() {
       },
     },
   })
-
-  return supabaseServerInstance
 }
 
-// For backward compatibility
-export const supabaseServer = getSupabaseServer()
+// For backward compatibility, we'll export this function that can be used
+// in route handlers
+export async function createServerClient(cookieStore?: { get: (name: string) => Cookie | undefined }) {
+  return getSupabaseServer()
+}
+
+// Export a dummy client for type compatibility
+export const supabaseServer = null

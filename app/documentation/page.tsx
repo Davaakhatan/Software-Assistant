@@ -3,6 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import DocumentationGenerator from "./documentation-generator"
+import SavedDocumentation from "./saved-documentation"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export default function DocumentationPage() {
   return (
@@ -21,67 +23,82 @@ export default function DocumentationPage() {
         <p className="text-muted-foreground">Generate comprehensive documentation for your project</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2">
-          <DocumentationGenerator />
-        </div>
+      <Tabs defaultValue="generator" className="space-y-4">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="generator">Generator</TabsTrigger>
+          <TabsTrigger value="saved">Saved Documentation</TabsTrigger>
+        </TabsList>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Documentation Tips</CardTitle>
-              <CardDescription>Guidelines for effective documentation</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <h3 className="font-medium">Keep It Updated</h3>
-                <p className="text-sm text-muted-foreground">Documentation should evolve with your code.</p>
-              </div>
-              <div>
-                <h3 className="font-medium">Use Examples</h3>
-                <p className="text-sm text-muted-foreground">Include code examples to illustrate usage.</p>
-              </div>
-              <div>
-                <h3 className="font-medium">Consider Your Audience</h3>
-                <p className="text-sm text-muted-foreground">
-                  Tailor documentation to different user types (developers, end-users).
-                </p>
-              </div>
-              <div>
-                <h3 className="font-medium">Include Visuals</h3>
-                <p className="text-sm text-muted-foreground">Diagrams and screenshots can clarify complex concepts.</p>
-              </div>
-            </CardContent>
-          </Card>
+        <TabsContent value="generator" className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2">
+              <DocumentationGenerator />
+            </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Documentation Types</CardTitle>
-              <CardDescription>Different types of documentation</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <h3 className="font-medium">API Documentation</h3>
-                <p className="text-sm text-muted-foreground">Describes endpoints, parameters, and responses.</p>
-              </div>
-              <div>
-                <h3 className="font-medium">User Guides</h3>
-                <p className="text-sm text-muted-foreground">Step-by-step instructions for end users.</p>
-              </div>
-              <div>
-                <h3 className="font-medium">Technical Documentation</h3>
-                <p className="text-sm text-muted-foreground">
-                  Detailed information for developers and technical staff.
-                </p>
-              </div>
-              <div>
-                <h3 className="font-medium">Architecture Documentation</h3>
-                <p className="text-sm text-muted-foreground">Describes system components and their interactions.</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Documentation Tips</CardTitle>
+                  <CardDescription>Guidelines for effective documentation</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <h3 className="font-medium">Keep It Updated</h3>
+                    <p className="text-sm text-muted-foreground">Documentation should evolve with your code.</p>
+                  </div>
+                  <div>
+                    <h3 className="font-medium">Use Examples</h3>
+                    <p className="text-sm text-muted-foreground">Include code examples to illustrate usage.</p>
+                  </div>
+                  <div>
+                    <h3 className="font-medium">Consider Your Audience</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Tailor documentation to different user types (developers, end-users).
+                    </p>
+                  </div>
+                  <div>
+                    <h3 className="font-medium">Include Visuals</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Diagrams and screenshots can clarify complex concepts.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Documentation Types</CardTitle>
+                  <CardDescription>Different types of documentation</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <h3 className="font-medium">API Documentation</h3>
+                    <p className="text-sm text-muted-foreground">Describes endpoints, parameters, and responses.</p>
+                  </div>
+                  <div>
+                    <h3 className="font-medium">User Guides</h3>
+                    <p className="text-sm text-muted-foreground">Step-by-step instructions for end users.</p>
+                  </div>
+                  <div>
+                    <h3 className="font-medium">Technical Documentation</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Detailed information for developers and technical staff.
+                    </p>
+                  </div>
+                  <div>
+                    <h3 className="font-medium">Architecture Documentation</h3>
+                    <p className="text-sm text-muted-foreground">Describes system components and their interactions.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="saved" className="space-y-4">
+          <SavedDocumentation />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

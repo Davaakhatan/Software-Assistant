@@ -13,7 +13,11 @@ export function validateMermaidSyntax(code: string): string {
   // Normalize line breaks
   let sanitized = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
 
-  // Fix common syntax issues
+  // Remove comments that are causing issues
+  sanitized = sanitized.replace(/\s*%%.*$/gm, "")
+
+  // Replace special characters in type definitions
+  sanitized = sanitized.replace(/~/g, ".")
 
   // Ensure 'end' is always on its own line
   sanitized = sanitized.replace(/(\S+)end(\s|$)/g, "$1\nend$2")
@@ -32,6 +36,46 @@ export function validateMermaidSyntax(code: string): string {
     return `--> ${text.trim()}`
   })
 
+  // Handle subgraph syntax issues
+  sanitized = sanitized.replace(/subgraph\s+([^"\n]+)(?!\s*")/g, (match, title) => {
+    if (title.includes(" ")) {
+      return `subgraph "${title.trim()}"`
+    }
+    return match
+  })
+
+  // Handle node definitions and connections
+  sanitized = sanitized.replace(/\[([^\]]*)\]/g, (match, p1) => {
+    if (/[\s$[\]/\\:;,]/.test(p1) && !p1.startsWith('"') && !p1.endsWith('"')) {
+      return `["${p1}"]`
+    }
+    return match
+  })
+
+  // Fix parentheses in node text - replace with HTML entities
+  sanitized = sanitized.replace(/\[([^\]]*$[^)]*$[^\]]*)\]/g, (match) => {
+    return match.replace(/$/g, "&#40;").replace(/$/g, "&#41;")
+  })
+
+  // Ensure that node labels with special characters are properly escaped
+  sanitized = sanitized.replace(/([A-Za-z0-9_]+)\[([^\]]+)\]/g, (match, nodeId, label) => {
+    if (label.includes("]") || label.includes("[")) {
+      return `${nodeId}["${label.replace(/["']/g, "'")}"]`
+    }
+    return match
+  })
+
+  // Aggressively escape special characters within node labels
+  sanitized = sanitized.replace(/\[([^\]]*)\]/g, (match, label) => {
+    const escapedLabel = label
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
+    return `[${escapedLabel}]`
+  })
+
   // Split into lines for processing
   const lines = sanitized.split("\n")
   const processedLines = []
@@ -42,18 +86,6 @@ export function validateMermaidSyntax(code: string): string {
 
     // Skip empty lines
     if (!line) continue
-
-    // Handle comments
-    if (line.includes("%%")) {
-      const parts = line.split("%%")
-      if (parts[0].trim()) {
-        processedLines.push(parts[0].trim())
-      }
-      if (parts[1].trim()) {
-        processedLines.push(`%% ${parts[1].trim()}`)
-      }
-      continue
-    }
 
     // Handle subgraph declarations
     if (line.startsWith("subgraph")) {
@@ -83,9 +115,9 @@ export function validateMermaidSyntax(code: string): string {
         return match
       })
 
-      // Fix parentheses in node text
-      line = line.replace(/\[([^\]]*$$[^$$]*\)[^\]]*)\]/g, (match) => {
-        return match.replace(/$$/g, "&#40;").replace(/$$/g, "&#41;")
+      // Fix parentheses in node text - replace with HTML entities
+      line = line.replace(/\[([^\]]*$[^)]*$[^\]]*)\]/g, (match) => {
+        return match.replace(/$/g, "&#40;").replace(/$/g, "&#41;")
       })
 
       processedLines.push(line)
@@ -108,6 +140,12 @@ export function validateMermaidSyntax(code: string): string {
         // Complex case with multiple arrows, just add the line as is
         processedLines.push(line)
       }
+    }
+    // Handle class properties
+    else if (line.includes(" : ")) {
+      // Ensure there are no trailing comments or special characters
+      const cleanedLine = line.split("%%")[0].trim()
+      processedLines.push(cleanedLine)
     } else {
       processedLines.push(line)
     }
@@ -137,4 +175,105 @@ export function extractNodeIds(code: string): string[] {
   }
 
   return Array.from(nodeIds)
+}
+
+/**
+ * Validates the syntax of a Mermaid architecture diagram
+ * @param code The Mermaid diagram code to validate
+ * @returns The validated code or an empty string if invalid
+ */
+export function validateMermaidSyntaxArchitecture(code: string): string {
+  // Basic check to prevent empty code
+  if (!code || code.trim() === "") {
+    return "" // Return empty string if code is empty
+  }
+
+  // Check if the code starts with 'graph'
+  if (!code.trim().startsWith("graph")) {
+    // Try to fix it by adding 'graph TD' at the beginning
+    code = "graph TD\n" + code
+  }
+
+  // Add more sophisticated validation here if needed
+  return code // Return the original or fixed code
+}
+
+/**
+ * Validates the syntax of a Mermaid component diagram
+ * @param code The Mermaid diagram code to validate
+ * @returns The validated code or an empty string if invalid
+ */
+export function validateMermaidSyntaxComponent(code: string): string {
+  // Basic check to prevent empty code
+  if (!code || code.trim() === "") {
+    return "" // Return empty string if code is empty
+  }
+
+  // Check if the code starts with 'classDiagram'
+  if (!code.trim().startsWith("classDiagram")) {
+    // Try to fix it by adding 'classDiagram' at the beginning
+    code = "classDiagram\n" + code
+  }
+
+  // Add more sophisticated validation here if needed
+  return code // Return the original or fixed code
+}
+
+/**
+ * Extracts a Mermaid diagram from a text specification
+ * @param specification The text specification that might contain a Mermaid diagram
+ * @returns The extracted Mermaid diagram code or null if none found
+ */
+export function extractMermaidDiagram(specification: string): string | null {
+  if (!specification) return null
+
+  // Look for Mermaid code blocks in markdown format
+  const mermaidRegex = /```mermaid\s+([\s\S]*?)\s+```/
+  const match = specification.match(mermaidRegex)
+
+  if (match && match[1]) {
+    return match[1].trim()
+  }
+
+  // If no markdown code block, look for graph TD or classDiagram
+  if (specification.includes("graph TD") || specification.includes("graph LR")) {
+    // Extract from "graph TD" to the end of that section
+    const graphMatch = specification.match(/(graph\s+TD|graph\s+LR)[\s\S]*?(?=\n\s*\n|$)/)
+    if (graphMatch) {
+      return graphMatch[0].trim()
+    }
+  }
+
+  if (specification.includes("classDiagram")) {
+    // Extract from "classDiagram" to the end of that section
+    const classMatch = specification.match(/classDiagram[\s\S]*?(?=\n\s*\n|$)/)
+    if (classMatch) {
+      return classMatch[0].trim()
+    }
+  }
+
+  return null
+}
+
+/**
+ * Checks if a string contains valid Mermaid diagram syntax
+ * @param text The text to check
+ * @returns True if the text contains Mermaid syntax, false otherwise
+ */
+export function containsMermaidSyntax(text: string): boolean {
+  if (!text) return false
+
+  // Check for common Mermaid syntax patterns
+  const mermaidPatterns = [
+    /graph\s+TD/i,
+    /graph\s+LR/i,
+    /classDiagram/i,
+    /sequenceDiagram/i,
+    /flowchart/i,
+    /gantt/i,
+    /pie/i,
+    /erDiagram/i,
+  ]
+
+  return mermaidPatterns.some((pattern) => pattern.test(text))
 }

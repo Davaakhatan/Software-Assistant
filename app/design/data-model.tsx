@@ -8,33 +8,33 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label"
 import { Save, Wand2, Copy, Check, RefreshCw } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { saveDesign } from "./actions"
 import MermaidDiagram from "@/components/mermaid-diagram"
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
-import { getSupabase } from "@/lib/supabase"
+import { saveDesign } from "./actions"
+import { useAIProvider } from "@/context/ai-provider-context"
+import { generateAIText } from "@/lib/ai-service"
 
 export default function DataModel() {
   const { toast } = useToast()
+  const { provider, temperature } = useAIProvider()
   const [diagramCode, setDiagramCode] = useState(`classDiagram
-    class User {
-      +String id
-      +String name
-      +String email
-      +String password
-      +Date createdAt
-      +Date updatedAt
-    }
-    
-    class Profile {
-      +String id
-      +String userId
-      +String bio
-      +String avatar
-      +Date createdAt
-      +Date updatedAt
-    }
-    
-    User "1" -- "1" Profile : has`)
+class User
+User : +String id
+User : +String name
+User : +String email
+User : +String password
+User : +Date createdAt
+User : +Date updatedAt
+
+class Profile
+Profile : +String id
+Profile : +String userId
+Profile : +String bio
+Profile : +String avatar
+Profile : +Date createdAt
+Profile : +Date updatedAt
+
+User "1" -- "1" Profile : has`)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [specificationId, setSpecificationId] = useState("")
@@ -43,11 +43,19 @@ export default function DataModel() {
   const [isCopied, setIsCopied] = useState(false)
   const [selectedSpecification, setSelectedSpecification] = useState(null)
   const [previewError, setPreviewError] = useState(null)
+  const [fetchError, setFetchError] = useState(null)
+  const [authWarning, setAuthWarning] = useState(false)
+  const [schemaWarning, setSchemaWarning] = useState(null)
+  const [apiKeyMissing, setApiKeyMissing] = useState(false)
 
-  // Fetch specifications on component mount
   useEffect(() => {
+    // Check if API key exists
+    const apiKey = localStorage.getItem("openai_api_key")
+    setApiKeyMissing(!apiKey || !apiKey.startsWith("sk-"))
+
     const fetchSpecifications = async () => {
       try {
+        setFetchError(null)
         const result = await getSpecifications()
         if (result.success) {
           setSpecifications(result.data)
@@ -60,6 +68,7 @@ export default function DataModel() {
         }
       } catch (error) {
         console.error("Error fetching specifications:", error)
+        setFetchError(error.message || "Failed to load specifications")
         toast({
           title: "Error",
           description: "Failed to load specifications",
@@ -100,26 +109,125 @@ export default function DataModel() {
     })
   }
 
-  // Function to sanitize mermaid code and fix common syntax issues
-  const sanitizeMermaidCode = (code) => {
+  // Convert traditional class diagram syntax to the simpler format
+  const convertToSimpleSyntax = (code) => {
     if (!code) return ""
 
-    // Replace problematic characters in node text
-    const sanitized = code
-      // Fix class definitions with parentheses
-      .replace(/class\s+([A-Za-z0-9_]+)\s*\{([^}]*)\}/g, (match, className, content) => {
-        // Replace parentheses in class content with HTML entities
-        const fixedContent = content.replace(/$$/g, "&#40;").replace(/$$/g, "&#41;")
-        return `class ${className} {${fixedContent}}`
-      })
+    // If it's already in the simple format, return as is
+    if (!code.includes("{") && code.includes("class") && code.includes(":")) {
+      // Just clean up any comments or special characters
+      return cleanupDiagramCode(code)
+    }
 
-      // Fix relationship syntax
-      .replace(/([A-Za-z0-9_]+)\s+"([^"]+)"\s+--\s+"([^"]+)"\s+([A-Za-z0-9_]+)/g, '$1 "$2" -- "$3" $4')
+    // Normalize line breaks
+    let result = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
 
-      // Ensure proper spacing in relationships
-      .replace(/([A-Za-z0-9_]+)\s*--\s*([A-Za-z0-9_]+)/g, "$1 -- $2")
+    // Remove comments that are causing issues
+    result = result.replace(/\s*%%.*$/gm, "")
 
-    return sanitized
+    // Replace special characters in type definitions
+    result = result.replace(/~/g, ".")
+
+    // Ensure classDiagram is at the beginning
+    if (!result.trim().startsWith("classDiagram")) {
+      result = "classDiagram\n" + result
+    }
+
+    // Split into lines
+    const lines = result.split("\n")
+    const newLines = ["classDiagram"]
+
+    // Process each line
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim()
+
+      // Skip empty lines and the classDiagram declaration
+      if (!line || line === "classDiagram") continue
+
+      // Handle class definitions with curly braces
+      if (line.startsWith("class ") && line.includes("{")) {
+        // Extract class name
+        const className = line.substring(6, line.indexOf("{")).trim()
+        newLines.push(`class ${className}`)
+
+        // Process class properties
+        let j = i + 1
+        while (j < lines.length && !lines[j].includes("}")) {
+          const propLine = lines[j].trim()
+
+          // If it's a property line (starts with + or -)
+          if (propLine.startsWith("+") || propLine.startsWith("-")) {
+            const propName = propLine.substring(1).trim()
+            newLines.push(`${className} : ${propName}`)
+          }
+
+          j++
+        }
+
+        // Skip to after the closing brace
+        i = j
+      }
+      // Handle simple class declarations
+      else if (line.startsWith("class ") && !line.includes("{")) {
+        newLines.push(line)
+      }
+      // Handle relationships
+      else if (line.includes("--")) {
+        newLines.push(line)
+      }
+      // Handle class properties directly
+      else if (line.includes(" : ")) {
+        newLines.push(line)
+      }
+    }
+
+    return newLines.join("\n")
+  }
+
+  // Add a new function to clean up diagram code
+  const cleanupDiagramCode = (code) => {
+    if (!code) return ""
+
+    // Remove comments
+    let cleaned = code.replace(/\s*%%.*$/gm, "")
+
+    // Replace special characters
+    cleaned = cleaned.replace(/~/g, ".")
+
+    // Split into lines for better processing
+    const lines = cleaned.split("\n")
+    const newLines = []
+
+    // Process each line
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim()
+
+      // Skip empty lines
+      if (!line) continue
+
+      // Keep class diagram declaration
+      if (line === "classDiagram" || line === "erDiagram") {
+        newLines.push(line)
+        continue
+      }
+
+      // Handle class definitions and relationships
+      if (line.startsWith("class ") || line.includes(" -- ")) {
+        newLines.push(line)
+      }
+      // Handle class properties
+      else if (line.includes(" : ")) {
+        // Ensure there are no trailing comments or special characters
+        const cleanedLine = line.split("%%")[0].trim()
+        newLines.push(cleanedLine)
+      }
+      // Add other lines as is
+      else {
+        newLines.push(line)
+      }
+    }
+
+    return newLines.join("\n")
   }
 
   const generateFromSpecification = async () => {
@@ -127,6 +235,18 @@ export default function DataModel() {
       toast({
         title: "Error",
         description: "Please select a specification",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Check if API key exists
+    const apiKey = localStorage.getItem("openai_api_key")
+    if (!apiKey || !apiKey.startsWith("sk-")) {
+      setApiKeyMissing(true)
+      toast({
+        title: "API Key Missing",
+        description: "Please add your OpenAI API key in the Settings page",
         variant: "destructive",
       })
       return
@@ -144,27 +264,78 @@ export default function DataModel() {
 
       const specData = result.data
 
-      // First, try to extract a diagram from the specification if it exists
-      const extractedDiagram = extractDiagramFromSpecification(specData)
+      // Prepare a prompt for the AI based on the specification
+      const prompt = `
+Generate a Mermaid diagram for the data model of the following application:
 
-      if (extractedDiagram) {
-        // Sanitize the extracted diagram to ensure it's valid
-        const sanitizedDiagram = sanitizeMermaidCode(extractedDiagram)
-        setDiagramCode(sanitizedDiagram)
-        toast({
-          title: "Data model extracted",
-          description: "Data model has been extracted from the specification.",
-        })
-      } else {
-        // Generate a diagram based on the specification data using AI
-        const generatedDiagram = await generateDiagramWithAI(specData)
-        // Sanitize the generated diagram to ensure it's valid
-        const sanitizedDiagram = sanitizeMermaidCode(generatedDiagram)
-        setDiagramCode(sanitizedDiagram)
+App Name: ${specData.app_name || "Unknown"}
+App Type: ${specData.app_type || "web"}
+Description: ${specData.app_description || ""}
+
+${specData.database_schema ? `# Database Schema\n${specData.database_schema}\n\nPlease use the above database schema information to create an accurate data model.` : ""}
+${specData.functional_requirements ? `Functional Requirements: ${specData.functional_requirements}` : ""}
+
+Please generate a Mermaid diagram using the 'classDiagram' syntax that shows the data model.
+If a database schema is provided above, use it as the primary source for creating the diagram.
+Include all tables mentioned in the schema with their fields and relationships.
+Do not use curly braces {} for class definitions.
+Instead, define each property on a separate line with the class name followed by a colon.
+Show relationships between entities with proper cardinality (one-to-one, one-to-many, many-to-many).
+Do not include any explanatory text, only the Mermaid diagram code.
+Do not use comments (lines starting with %%) in the diagram.
+Do not use the tilde (~) character, use dot (.) instead for nested types.
+`
+
+      console.log("Generating diagram with AI")
+
+      // Use the AI service to generate the diagram
+      const aiResult = await generateAIText(
+        prompt,
+        "You are a database architect expert in creating Mermaid diagrams for data models.",
+        {
+          provider,
+          temperature,
+          apiKey: apiKey, // Pass the API key
+        },
+      )
+
+      if (aiResult.success && aiResult.text) {
+        // Extract the Mermaid diagram from the response
+        let diagramCode = aiResult.text
+
+        // Clean up the response to extract just the Mermaid diagram
+        const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(classDiagram[\s\S]*?)```/)
+        if (mermaidMatch && mermaidMatch[1]) {
+          diagramCode = mermaidMatch[1].trim()
+        } else {
+          // If no mermaid code block found, look for classDiagram or erDiagram
+          const classMatch = diagramCode.match(/(classDiagram[\s\S]*?)(?=\n\s*\n|$)/)
+          if (classMatch && classMatch[1]) {
+            diagramCode = classMatch[1].trim()
+          } else {
+            const erMatch = diagramCode.match(/(erDiagram[\s\S]*?)(?=\n\s*\n|$)/)
+            if (erMatch && erMatch[1]) {
+              diagramCode = erMatch[1].trim()
+            }
+          }
+        }
+
+        // If we still don't have a valid diagram, generate a default one
+        if (!diagramCode.includes("classDiagram") && !diagramCode.includes("erDiagram")) {
+          console.log("AI didn't generate a valid diagram, using fallback")
+          diagramCode = generateDefaultDiagram(specData)
+        }
+
+        // Convert to simple syntax
+        const simplifiedDiagram = convertToSimpleSyntax(diagramCode)
+        setDiagramCode(simplifiedDiagram)
+
         toast({
           title: "Data model generated",
           description: "Data model has been generated based on the selected specification.",
         })
+      } else {
+        throw new Error(aiResult.error || "Failed to generate diagram with AI")
       }
     } catch (error) {
       console.error("Error generating data model:", error)
@@ -179,130 +350,6 @@ export default function DataModel() {
     }
   }
 
-  // Function to extract a diagram from the specification text
-  const extractDiagramFromSpecification = (specData) => {
-    // Look for mermaid diagram in database_schema section
-    if (specData.database_schema) {
-      // Try to find a mermaid diagram in the database_schema field
-      const mermaidMatch = specData.database_schema.match(/```mermaid\s*([\s\S]*?)\s*```/)
-      if (mermaidMatch && mermaidMatch[1]) {
-        return mermaidMatch[1].trim()
-      }
-
-      // Try to find a classDiagram pattern without mermaid markers
-      const classMatch = specData.database_schema.match(/classDiagram\s*([\s\S]*?)(?:\n\n|\n$|$)/)
-      if (classMatch && classMatch[0]) {
-        return classMatch[0].trim()
-      }
-
-      // Try to find an erDiagram pattern without mermaid markers
-      const erMatch = specData.database_schema.match(/erDiagram\s*([\s\S]*?)(?:\n\n|\n$|$)/)
-      if (erMatch && erMatch[0]) {
-        return erMatch[0].trim()
-      }
-    }
-
-    // If no diagram found in database_schema, try to find it in the entire specification
-    const allText = [
-      specData.app_description,
-      specData.functional_requirements,
-      specData.non_functional_requirements,
-      specData.system_architecture,
-      specData.database_schema,
-      specData.api_endpoints,
-      specData.user_stories,
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-
-    // Look for mermaid diagram in the entire text
-    const mermaidMatch = allText.match(/```mermaid\s*([\s\S]*?)\s*```/)
-    if (mermaidMatch && mermaidMatch[1]) {
-      // Check if it's a data model diagram (contains classDiagram or erDiagram)
-      const diagramContent = mermaidMatch[1].trim()
-      if (diagramContent.includes("classDiagram") || diagramContent.includes("erDiagram")) {
-        return diagramContent
-      }
-    }
-
-    return null
-  }
-
-  // Function to generate a diagram with AI based on the specification
-  const generateDiagramWithAI = async (specData) => {
-    try {
-      // Prepare a prompt for the AI based on the specification
-      const prompt = `
-Generate a Mermaid diagram for the data model of the following application:
-
-App Name: ${specData.app_name || "Unknown"}
-App Type: ${specData.app_type || "web"}
-Description: ${specData.app_description || ""}
-
-${specData.database_schema ? `Database Schema Description: ${specData.database_schema}` : ""}
-${specData.functional_requirements ? `Functional Requirements: ${specData.functional_requirements}` : ""}
-
-Please generate a Mermaid diagram using the 'classDiagram' syntax that shows the data model.
-Include entity classes with their properties and data types.
-Show relationships between entities with proper cardinality (one-to-one, one-to-many, many-to-many).
-Use proper notation for inheritance, composition, and aggregation if applicable.
-Avoid using parentheses in class properties or methods as they can cause syntax errors.
-Do not include any explanatory text, only the Mermaid diagram code.
-`
-
-      // Make a request to the AI API
-      const response = await fetch("/api/generate-code", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          activeTab: "manual",
-          requirements: prompt,
-          language: "mermaid",
-          framework: "diagram",
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to generate diagram with AI")
-      }
-
-      const data = await response.json()
-
-      // Extract the Mermaid diagram from the response
-      let diagramCode = data.code
-
-      // Clean up the response to extract just the Mermaid diagram
-      const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(classDiagram[\s\S]*?)```/)
-      if (mermaidMatch && mermaidMatch[1]) {
-        diagramCode = mermaidMatch[1].trim()
-      } else {
-        // If no mermaid code block found, look for classDiagram or erDiagram
-        const classMatch = diagramCode.match(/(classDiagram[\s\S]*?)(?:\n\n|\n$|$)/)
-        if (classMatch && classMatch[1]) {
-          diagramCode = classMatch[1].trim()
-        } else {
-          const erMatch = diagramCode.match(/(erDiagram[\s\S]*?)(?:\n\n|\n$|$)/)
-          if (erMatch && erMatch[1]) {
-            diagramCode = erMatch[1].trim()
-          }
-        }
-      }
-
-      // If we still don't have a valid diagram, generate a default one
-      if (!diagramCode.includes("classDiagram") && !diagramCode.includes("erDiagram")) {
-        return generateDefaultDiagram(specData)
-      }
-
-      return diagramCode
-    } catch (error) {
-      console.error("Error generating diagram with AI:", error)
-      // Fallback to a default diagram
-      return generateDefaultDiagram(specData)
-    }
-  }
-
   // Function to generate a default diagram based on the specification data
   const generateDefaultDiagram = (specData) => {
     const appName = specData.app_name || "Application"
@@ -311,71 +358,66 @@ Do not include any explanatory text, only the Mermaid diagram code.
     let diagram = `classDiagram\n`
 
     // Add User class for all app types
-    diagram += `  class User {\n`
-    diagram += `    +String id\n`
-    diagram += `    +String name\n`
-    diagram += `    +String email\n`
-    diagram += `    +String password\n`
-    diagram += `    +Date createdAt\n`
-    diagram += `    +Date updatedAt\n`
-    diagram += `  }\n\n`
+    diagram += `  class User\n`
+    diagram += `  User : +String id\n`
+    diagram += `  User : +String name\n`
+    diagram += `  User : +String email\n`
+    diagram += `  User : +String password\n`
+    diagram += `  User : +Date createdAt\n`
+    diagram += `  User : +Date updatedAt\n\n`
 
     // Add Profile class for all app types
-    diagram += `  class Profile {\n`
-    diagram += `    +String id\n`
-    diagram += `    +String userId\n`
-    diagram += `    +String bio\n`
-    diagram += `    +String avatar\n`
-    diagram += `    +Date createdAt\n`
-    diagram += `    +Date updatedAt\n`
-    diagram += `  }\n\n`
+    diagram += `  class Profile\n`
+    diagram += `  Profile : +String id\n`
+    diagram += `  Profile : +String userId\n`
+    diagram += `  Profile : +String bio\n`
+    diagram += `  Profile : +String avatar\n`
+    diagram += `  Profile : +Date createdAt\n`
+    diagram += `  Profile : +Date updatedAt\n\n`
 
     // Add app-specific classes based on app type
     if (appType === "ecommerce") {
       // Product class
-      diagram += `  class Product {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String name\n`
-      diagram += `    +String description\n`
-      diagram += `    +Float price\n`
-      diagram += `    +Int stock\n`
-      diagram += `    +String[] images\n`
-      diagram += `    +String categoryId\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Product\n`
+      diagram += `  Product : +String id\n`
+      diagram += `  Product : +String name\n`
+      diagram += `  Product : +String description\n`
+      diagram += `  Product : +Float price\n`
+      diagram += `  Product : +Int stock\n`
+      diagram += `  Product : +String[] images\n`
+      diagram += `  Product : +String categoryId\n`
+      diagram += `  Product : +Date createdAt\n`
+      diagram += `  Product : +Date updatedAt\n\n`
 
       // Category class
-      diagram += `  class Category {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String name\n`
-      diagram += `    +String description\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Category\n`
+      diagram += `  Category : +String id\n`
+      diagram += `  Category : +String name\n`
+      diagram += `  Category : +String description\n`
+      diagram += `  Category : +String slug\n`
+      diagram += `  Category : +Date createdAt\n`
+      diagram += `  Category : +Date updatedAt\n\n`
 
       // Order class
-      diagram += `  class Order {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String userId\n`
-      diagram += `    +Float total\n`
-      diagram += `    +String status\n`
-      diagram += `    +String shippingAddress\n`
-      diagram += `    +String paymentMethod\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Order\n`
+      diagram += `  Order : +String id\n`
+      diagram += `  Order : +String userId\n`
+      diagram += `  Order : +Float total\n`
+      diagram += `  Order : +String status\n`
+      diagram += `  Order : +String shippingAddress\n`
+      diagram += `  Order : +String paymentMethod\n`
+      diagram += `  Order : +Date createdAt\n`
+      diagram += `  Order : +Date updatedAt\n\n`
 
       // OrderItem class
-      diagram += `  class OrderItem {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String orderId\n`
-      diagram += `    +String productId\n`
-      diagram += `    +Int quantity\n`
-      diagram += `    +Float price\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class OrderItem\n`
+      diagram += `  OrderItem : +String id\n`
+      diagram += `  OrderItem : +String orderId\n`
+      diagram += `  OrderItem : +String productId\n`
+      diagram += `  OrderItem : +Int quantity\n`
+      diagram += `  OrderItem : +Float price\n`
+      diagram += `  OrderItem : +Date createdAt\n`
+      diagram += `  OrderItem : +Date updatedAt\n\n`
 
       // Add relationships
       diagram += `  User "1" -- "1" Profile : has\n`
@@ -385,43 +427,40 @@ Do not include any explanatory text, only the Mermaid diagram code.
       diagram += `  Product "many" -- "1" Category : belongs to\n`
     } else if (appType === "crm") {
       // Contact class
-      diagram += `  class Contact {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String userId\n`
-      diagram += `    +String name\n`
-      diagram += `    +String email\n`
-      diagram += `    +String phone\n`
-      diagram += `    +String company\n`
-      diagram += `    +String status\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Contact\n`
+      diagram += `  Contact : +String id\n`
+      diagram += `  Contact : +String userId\n`
+      diagram += `  Contact : +String name\n`
+      diagram += `  Contact : +String email\n`
+      diagram += `  Contact : +String phone\n`
+      diagram += `  Contact : +String company\n`
+      diagram += `  Contact : +String status\n`
+      diagram += `  Contact : +Date createdAt\n`
+      diagram += `  Contact : +Date updatedAt\n\n`
 
       // Lead class
-      diagram += `  class Lead {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String userId\n`
-      diagram += `    +String contactId\n`
-      diagram += `    +String name\n`
-      diagram += `    +String source\n`
-      diagram += `    +Float value\n`
-      diagram += `    +String status\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Lead\n`
+      diagram += `  Lead : +String id\n`
+      diagram += `  Lead : +String userId\n`
+      diagram += `  Lead : +String contactId\n`
+      diagram += `  Lead : +String name\n`
+      diagram += `  Lead : +String source\n`
+      diagram += `  Lead : +Float value\n`
+      diagram += `  Lead : +String status\n`
+      diagram += `  Lead : +Date createdAt\n`
+      diagram += `  Lead : +Date updatedAt\n\n`
 
       // Deal class
-      diagram += `  class Deal {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String userId\n`
-      diagram += `    +String leadId\n`
-      diagram += `    +String name\n`
-      diagram += `    +Float value\n`
-      diagram += `    +String stage\n`
-      diagram += `    +Date closingDate\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Deal\n`
+      diagram += `  Deal : +String id\n`
+      diagram += `  Deal : +String userId\n`
+      diagram += `  Deal : +String leadId\n`
+      diagram += `  Deal : +String name\n`
+      diagram += `  Deal : +Float value\n`
+      diagram += `  Deal : +String stage\n`
+      diagram += `  Deal : +Date closingDate\n`
+      diagram += `  Deal : +Date createdAt\n`
+      diagram += `  Deal : +Date updatedAt\n\n`
 
       // Add relationships
       diagram += `  User "1" -- "1" Profile : has\n`
@@ -432,39 +471,36 @@ Do not include any explanatory text, only the Mermaid diagram code.
       diagram += `  Lead "1" -- "many" Deal : converts to\n`
     } else if (appType === "blog" || appType === "cms") {
       // Post class
-      diagram += `  class Post {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String userId\n`
-      diagram += `    +String title\n`
-      diagram += `    +String content\n`
-      diagram += `    +String excerpt\n`
-      diagram += `    +String[] tags\n`
-      diagram += `    +String status\n`
-      diagram += `    +Date publishedAt\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Post\n`
+      diagram += `  Post : +String id\n`
+      diagram += `  Post : +String userId\n`
+      diagram += `  Post : +String title\n`
+      diagram += `  Post : +String content\n`
+      diagram += `  Post : +String excerpt\n`
+      diagram += `  Post : +String[] tags\n`
+      diagram += `  Post : +String status\n`
+      diagram += `  Post : +Date publishedAt\n`
+      diagram += `  Post : +Date createdAt\n`
+      diagram += `  Post : +Date updatedAt\n\n`
 
       // Category class
-      diagram += `  class Category {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String name\n`
-      diagram += `    +String description\n`
-      diagram += `    +String slug\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Category\n`
+      diagram += `  Category : +String id\n`
+      diagram += `  Category : +String name\n`
+      diagram += `  Category : +String description\n`
+      diagram += `  Category : +String slug\n`
+      diagram += `  Category : +Date createdAt\n`
+      diagram += `  Category : +Date updatedAt\n\n`
 
       // Comment class
-      diagram += `  class Comment {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String postId\n`
-      diagram += `    +String userId\n`
-      diagram += `    +String content\n`
-      diagram += `    +String status\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Comment\n`
+      diagram += `  Comment : +String id\n`
+      diagram += `  Comment : +String postId\n`
+      diagram += `  Comment : +String userId\n`
+      diagram += `  Comment : +String content\n`
+      diagram += `  Comment : +String status\n`
+      diagram += `  Comment : +Date createdAt\n`
+      diagram += `  Comment : +Date updatedAt\n\n`
 
       // Add relationships
       diagram += `  User "1" -- "1" Profile : has\n`
@@ -475,26 +511,24 @@ Do not include any explanatory text, only the Mermaid diagram code.
     } else {
       // Generic classes for other app types
       // Content class
-      diagram += `  class Content {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String userId\n`
-      diagram += `    +String title\n`
-      diagram += `    +String description\n`
-      diagram += `    +String type\n`
-      diagram += `    +String status\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Content\n`
+      diagram += `  Content : +String id\n`
+      diagram += `  Content : +String userId\n`
+      diagram += `  Content : +String title\n`
+      diagram += `  Content : +String description\n`
+      diagram += `  Content : +String type\n`
+      diagram += `  Content : +String status\n`
+      diagram += `  Content : +Date createdAt\n`
+      diagram += `  Content : +Date updatedAt\n\n`
 
       // Settings class
-      diagram += `  class Settings {\n`
-      diagram += `    +String id\n`
-      diagram += `    +String userId\n`
-      diagram += `    +String key\n`
-      diagram += `    +String value\n`
-      diagram += `    +Date createdAt\n`
-      diagram += `    +Date updatedAt\n`
-      diagram += `  }\n\n`
+      diagram += `  class Settings\n`
+      diagram += `  Settings : +String id\n`
+      diagram += `  Settings : +String userId\n`
+      diagram += `  Settings : +String key\n`
+      diagram += `  Settings : +String value\n`
+      diagram += `  Settings : +Date createdAt\n`
+      diagram += `  Settings : +Date updatedAt\n\n`
 
       // Add relationships
       diagram += `  User "1" -- "1" Profile : has\n`
@@ -502,7 +536,8 @@ Do not include any explanatory text, only the Mermaid diagram code.
       diagram += `  User "1" -- "many" Settings : configures\n`
     }
 
-    return diagram
+    // Just ensure we clean up the final diagram
+    return cleanupDiagramCode(diagram)
   }
 
   const handleSave = async () => {
@@ -519,48 +554,16 @@ Do not include any explanatory text, only the Mermaid diagram code.
     try {
       // Find the specification to get its name for the project
       const spec = specifications.find((s) => s.id === specificationId)
-      const projectName = spec && spec.app_name ? spec.app_name : "Unknown Project"
+      const projectName = spec ? spec.app_name : "Unknown Project"
       console.log("Using project name:", projectName, "from specification:", spec)
 
-      // Create a temporary requirement ID linked to this specification
-      // This is needed because the current saveDesign function expects a requirementId
-      const supabase = getSupabase()
-
-      // Check if a requirement already exists for this specification
-      const { data: existingReq, error: existingReqError } = await supabase
-        .from("requirements")
-        .select("id")
-        .eq("specification_id", specificationId)
-        .maybeSingle()
-
-      let requirementId = null
-
-      if (!existingReqError && existingReq) {
-        // Use existing requirement
-        requirementId = existingReq.id
-      } else {
-        // Create a new requirement linked to this specification
-        const { data: newReq, error: newReqError } = await supabase
-          .from("requirements")
-          .insert({
-            project_name: projectName,
-            project_description: `Data model for ${projectName} - ${spec?.app_type || "Application"}`,
-            specification_id: specificationId,
-          })
-          .select()
-
-        if (newReqError) {
-          throw new Error(`Failed to create requirement: ${newReqError.message}`)
-        }
-
-        requirementId = newReq[0].id
-      }
-
-      // Now save the design with the requirement ID
+      // Use the saveDesign server action directly with the specification ID
+      // Explicitly set the type to "data-model" instead of "data"
       const result = await saveDesign({
-        type: "data",
+        type: "data-model", // Changed from "data" to "data-model"
         diagramCode,
-        requirementId,
+        specificationId, // Pass the specification ID directly
+        projectName, // Pass the project name
       })
 
       if (result.success) {
@@ -617,6 +620,15 @@ Do not include any explanatory text, only the Mermaid diagram code.
                   {selectedSpecification.app_name} - {selectedSpecification.app_type}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">{selectedSpecification.app_description}</p>
+
+                {selectedSpecification.database_schema && (
+                  <div className="mt-3 border-t pt-3">
+                    <p className="text-sm font-medium">Database Schema:</p>
+                    <pre className="text-xs bg-black/5 p-2 rounded mt-1 overflow-auto max-h-40">
+                      {selectedSpecification.database_schema}
+                    </pre>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -658,18 +670,7 @@ Do not include any explanatory text, only the Mermaid diagram code.
             <div>
               <div className="text-sm font-medium mb-2">Preview:</div>
               <div className="border rounded-md p-4 h-[400px] overflow-auto bg-white">
-                {diagramCode ? (
-                  <MermaidDiagram code={diagramCode} className="h-full w-full" />
-                ) : (
-                  <div className="flex items-center justify-center h-full text-muted-foreground">
-                    No diagram to preview. Generate or enter a diagram.
-                  </div>
-                )}
-                {previewError && (
-                  <div className="mt-2 p-2 text-sm text-red-500 bg-red-50 border border-red-200 rounded">
-                    Error: {previewError}
-                  </div>
-                )}
+                <MermaidDiagram code={diagramCode} className="h-full w-full" />
               </div>
             </div>
           </div>

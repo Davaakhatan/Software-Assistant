@@ -4,6 +4,8 @@ import Link from "next/link"
 import { ArrowLeft, Plus } from "lucide-react"
 import { formatDate } from "@/lib/utils"
 import MermaidDiagram from "@/components/mermaid-diagram"
+import MermaidDiagramComponent from "@/components/mermaid-diagram-component"
+import MermaidDiagramArchitecture from "@/components/mermaid-diagram-architecture"
 import { getSupabase } from "@/lib/supabase"
 
 export async function getDesigns() {
@@ -74,7 +76,13 @@ export default async function DesignsList() {
               </CardHeader>
               <CardContent className="flex-grow">
                 <div className="border rounded-md p-4 bg-white">
-                  <MermaidDiagram code={design.diagram_code} className="h-[150px] overflow-hidden" />
+                  {design.type === "component" ? (
+                    <MermaidDiagramComponent code={design.diagram_code} className="h-[150px] overflow-hidden" />
+                  ) : design.type === "architecture" ? (
+                    <MermaidDiagramArchitecture code={design.diagram_code} className="h-[150px] overflow-hidden" />
+                  ) : (
+                    <MermaidDiagram code={design.diagram_code} className="h-[150px] overflow-hidden" />
+                  )}
                 </div>
               </CardContent>
               <CardFooter>

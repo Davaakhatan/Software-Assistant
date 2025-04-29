@@ -28,67 +28,141 @@ export async function getDesigns() {
   }
 }
 
-export async function saveDesign({ type, diagramCode, requirementId }) {
+export async function saveDesign({ type, diagramCode, requirementId, specificationId, projectName }) {
   try {
-    const supabaseServer = getSupabaseServer()
+    // Use the server-side Supabase client to bypass RLS
+    const supabase = getSupabaseServer()
 
-    // First, get the project name from the requirement
-    let projectName = "Unknown Project"
+    let finalRequirementId = requirementId
 
-    if (requirementId) {
-      const { data: requirement, error: reqError } = await supabaseServer
+    // If we have a specificationId but no requirementId, create a requirement
+    if (specificationId && !requirementId) {
+      // Check if a requirement already exists for this specification
+      const { data: existingReq, error: existingReqError } = await supabase
         .from("requirements")
-        .select("project_name, specification_id")
-        .eq("id", requirementId)
-        .single()
+        .select("id")
+        .eq("specification_id", specificationId)
+        .maybeSingle()
 
-      if (!reqError && requirement) {
-        projectName = requirement.project_name
+      if (!existingReqError && existingReq) {
+        // Use existing requirement
+        finalRequirementId = existingReq.id
+      } else {
+        // Create a new requirement linked to this specification
+        const { data: newReq, error: newReqError } = await supabase
+          .from("requirements")
+          .insert({
+            project_name: projectName || "Unknown Project",
+            project_description: `Data model for ${projectName || "Unknown Project"}`,
+            specification_id: specificationId,
+          })
+          .select()
 
-        // If there's a specification_id, try to get the app_name from there
-        if (requirement.specification_id && (projectName === "Unknown Project" || !projectName)) {
-          const { data: spec, error: specError } = await supabaseServer
-            .from("specifications")
-            .select("app_name")
-            .eq("id", requirement.specification_id)
-            .single()
-
-          if (!specError && spec && spec.app_name) {
-            projectName = spec.app_name
-          }
+        if (newReqError) {
+          console.error("Error creating requirement:", newReqError)
+          // Continue without a requirement ID
+        } else {
+          finalRequirementId = newReq[0].id
         }
       }
     }
 
-    console.log("Saving design with project name:", projectName)
+    // Ensure the type is correctly set
+    // If type is "data", convert it to "data-model" to ensure consistency
+    const finalType = type === "data" ? "data-model" : type
 
-    const { data, error } = await supabaseServer
-      .from("designs")
-      .insert({
-        type: type === "data" ? "data-model" : type,
-        diagram_code: diagramCode,
-        requirement_id: requirementId,
-        project_name: projectName, // Store the project name directly in the designs table
-      })
-      .select()
+    // Try a simple insert with minimal fields first
+    const insertData = {
+      diagram_code: diagramCode,
+      type: finalType,
+      requirement_id: finalRequirementId,
+      project_name: projectName || "Unknown Project", // Add the project name
+    }
+
+    console.log("Saving design with data:", insertData)
+
+    // Try to insert with just the minimal fields
+    const { data, error } = await supabase.from("designs").insert(insertData).select()
 
     if (error) {
-      throw error
+      console.error("Error with minimal insert:", error)
+
+      // If the error is about the table not existing, try to create it
+      if (error.message.includes("relation") && error.message.includes("does not exist")) {
+        console.log("Designs table doesn't exist. Creating it...")
+
+        // Create the designs table with minimal required columns
+        const createTableQuery = `
+          CREATE TABLE IF NOT EXISTS designs (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            diagram_code TEXT NOT NULL,
+            type TEXT,
+            project_name TEXT,
+            requirement_id UUID,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+          );
+        `
+
+        const { error: createError } = await supabase.rpc("exec_sql", { sql: createTableQuery })
+
+        if (createError) {
+          console.error("Error creating table:", createError)
+
+          // If we can't create the table with RPC, try a direct insert again
+          // This might work if the table was created by another process in the meantime
+          const { data: retryData, error: retryError } = await supabase.from("designs").insert(insertData).select()
+
+          if (retryError) {
+            return {
+              success: false,
+              error: `Failed to save design: ${retryError.message}. Table creation also failed: ${createError.message}`,
+            }
+          }
+
+          return { success: true, data: retryData }
+        }
+
+        // Try the insert again after creating the table
+        const { data: newData, error: newError } = await supabase.from("designs").insert(insertData).select()
+
+        if (newError) {
+          return { success: false, error: `Table created but insert failed: ${newError.message}` }
+        }
+
+        return { success: true, data: newData }
+      }
+
+      // If the error is about a missing column, try a more basic approach
+      if (
+        error.message.includes("column") &&
+        (error.message.includes("user_id") || error.message.includes("requirement_id"))
+      ) {
+        console.log("Column error detected. Trying simplified insert...")
+
+        // Try an even more minimal insert
+        const { data: basicData, error: basicError } = await supabase
+          .from("designs")
+          .insert({
+            diagram_code: diagramCode,
+            type: finalType, // Use the corrected type here too
+            project_name: projectName || "Unknown Project", // Still include the project name
+          })
+          .select()
+
+        if (basicError) {
+          return { success: false, error: `Simplified insert also failed: ${basicError.message}` }
+        }
+
+        return { success: true, data: basicData }
+      }
+
+      return { success: false, error: error.message }
     }
 
-    revalidatePath("/design")
-    revalidatePath("/design-list")
-
-    return {
-      success: true,
-      data: data[0],
-    }
+    return { success: true, data }
   } catch (error) {
-    console.error("Error saving design:", error)
-    return {
-      success: false,
-      error: error.message,
-    }
+    console.error("Error in saveDesign:", error)
+    return { success: false, error: error.message || "An unexpected error occurred" }
   }
 }
 
@@ -176,10 +250,14 @@ export async function updateDesign(id, { type, diagramCode, requirementId }) {
       }
     }
 
+    // Ensure the type is correctly set
+    // If type is "data", convert it to "data-model" to ensure consistency
+    const finalType = type === "data" ? "data-model" : type
+
     const { data, error } = await supabaseServer
       .from("designs")
       .update({
-        type: type === "data" ? "data-model" : type,
+        type: finalType,
         diagram_code: diagramCode,
         requirement_id: requirementId,
         project_name: projectName, // Update the project name

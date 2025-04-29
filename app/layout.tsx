@@ -3,9 +3,9 @@ import "@/app/globals.css"
 import { Inter } from "next/font/google"
 import { MainNav } from "@/components/main-nav"
 import { ThemeProvider } from "@/components/theme-provider"
+import { AIProviderContextProvider } from "@/context/ai-provider-context"
 import { AISettings } from "@/components/ai-settings"
 import { Toaster } from "@/components/ui/toaster"
-import { AIProviderWrapper } from "@/components/ai-provider-wrapper"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <AIProviderWrapper>
+          <AIProviderContextProvider>
             <div className="flex min-h-screen flex-col">
               <header className="sticky top-0 z-40 border-b bg-background">
                 <div className="container flex h-16 items-center">
@@ -31,12 +31,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <AISettings />
             <Toaster />
-          </AIProviderWrapper>
+          </AIProviderContextProvider>
         </ThemeProvider>
       </body>
     </html>
   )
 }
-
-
-import './globals.css'

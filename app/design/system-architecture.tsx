@@ -8,16 +8,111 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label"
 import { Save, Wand2, Copy, Check, RefreshCw, AlertTriangle, Info } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import MermaidDiagram from "@/components/mermaid-diagram"
+import dynamic from "next/dynamic"
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
 import { createRequirementForSpecification, saveSystemArchitecture } from "./system-architecture-actions"
+import { useAIProvider } from "@/context/ai-provider-context"
+import { generateAIText } from "@/lib/ai-service"
+
+// Dynamically import the MermaidDiagram component with no SSR
+const MermaidDiagram = dynamic(() => import("@/components/mermaid-diagram-architecture"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-[400px] bg-gray-50">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+    </div>
+  ),
+})
+
+// Default diagrams for different application types
+const DEFAULT_DIAGRAMS = {
+  web: `graph TD
+  subgraph Frontend
+    A[Web Browser]
+    B[ReactJS App]
+  end
+  
+  subgraph Backend
+    C[API Gateway]
+    D[Node.js Server]
+    E[Authentication Service]
+  end
+  
+  subgraph Data_Storage
+    F[SQL Database]
+    G[Cache]
+  end
+  
+  A --> B
+  B --> C
+  C --> D
+  C --> E
+  D --> F
+  D --> G
+  E --> F`,
+  mobile: `graph TD
+  subgraph Client
+    A[Mobile App]
+    B[Local Storage]
+  end
+  
+  subgraph Backend
+    C[API Gateway]
+    D[Application Server]
+    E[Auth Service]
+  end
+  
+  subgraph Data_Layer
+    F[Database]
+    G[CDN]
+  end
+  
+  A --> B
+  A --> C
+  C --> D
+  C --> E
+  D --> F
+  D --> G
+  E --> F`,
+  ecommerce: `graph TD
+  subgraph Frontend
+    A[Web Browser]
+    B[Mobile App]
+  end
+  
+  subgraph Backend
+    C[API Gateway]
+    D[Product Service]
+    E[Order Service]
+    F[Payment Service]
+    G[User Service]
+  end
+  
+  subgraph Data_Storage
+    H[Product DB]
+    I[Order DB]
+    J[User DB]
+    K[Cache]
+  end
+  
+  A --> C
+  B --> C
+  C --> D
+  C --> E
+  C --> F
+  C --> G
+  D --> H
+  E --> I
+  G --> J
+  D --> K
+  E --> K`,
+}
 
 export default function SystemArchitecture() {
   const { toast } = useToast()
-  const [diagramCode, setDiagramCode] = useState(`graph LR
-  A[Client] --> B(Load Balancer)
-  B --> C{Application Servers}
-  C --> D[Database]`)
+  const { provider, temperature } = useAIProvider()
+
+  const [diagramCode, setDiagramCode] = useState(DEFAULT_DIAGRAMS.web)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [specificationId, setSpecificationId] = useState("")
@@ -29,8 +124,18 @@ export default function SystemArchitecture() {
   const [fetchError, setFetchError] = useState(null)
   const [authWarning, setAuthWarning] = useState(false)
   const [schemaWarning, setSchemaWarning] = useState(null)
+  const [apiKeyMissing, setApiKeyMissing] = useState(false)
+  const [apiKey, setApiKey] = useState("") // Store API key
 
   useEffect(() => {
+    // Check if API key exists and load it
+    if (typeof window !== "undefined") {
+      const storedApiKey = localStorage.getItem("openai_api_key")
+      setApiKey(storedApiKey || "")
+      setApiKeyMissing(!storedApiKey || !storedApiKey.startsWith("sk-"))
+      console.log("API key loaded from localStorage:", storedApiKey ? "Found key" : "No key found")
+    }
+
     const fetchSpecifications = async () => {
       try {
         setFetchError(null)
@@ -69,6 +174,18 @@ export default function SystemArchitecture() {
         const result = await getSpecificationById(id)
         if (result.success) {
           setSelectedSpecification(result.data)
+
+          // Set a default diagram based on the app type
+          if (result.data.app_type) {
+            const appType = result.data.app_type.toLowerCase()
+            if (appType.includes("mobile")) {
+              setDiagramCode(DEFAULT_DIAGRAMS.mobile)
+            } else if (appType.includes("ecommerce") || appType.includes("e-commerce")) {
+              setDiagramCode(DEFAULT_DIAGRAMS.ecommerce)
+            } else {
+              setDiagramCode(DEFAULT_DIAGRAMS.web)
+            }
+          }
         }
       } catch (error) {
         console.error("Error fetching specification details:", error)
@@ -98,6 +215,17 @@ export default function SystemArchitecture() {
       return
     }
 
+    // Check if API key exists
+    if (!apiKey || !apiKey.startsWith("sk-")) {
+      setApiKeyMissing(true)
+      toast({
+        title: "API Key Missing",
+        description: "Please add your OpenAI API key in the Settings page",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsGenerating(true)
     setPreviewError(null)
     try {
@@ -109,169 +237,120 @@ export default function SystemArchitecture() {
 
       const specData = result.data
 
-      // First try to extract architecture from the specification if it exists
-      const extractedDiagram = extractDiagramFromSpecification(specData)
-
-      if (extractedDiagram) {
-        const formattedDiagram = formatDiagram(extractedDiagram)
-        setDiagramCode(formattedDiagram)
-        toast({
-          title: "Diagram extracted",
-          description: "System architecture diagram was extracted from the specification",
-        })
-      } else {
-        // Generate a diagram based on the specification data
-        const generatedDiagram = await generateDiagramWithAI(specData)
-        const formattedDiagram = formatDiagram(generatedDiagram)
-        setDiagramCode(formattedDiagram)
-        toast({
-          title: "System architecture generated",
-          description: "System architecture has been generated based on the selected specification",
-        })
-      }
-    } catch (error) {
-      console.error("Error generating system architecture:", error)
-      setPreviewError(error.message)
-      toast({
-        title: "Error",
-        description: error.message || "Failed to generate system architecture",
-        variant: "destructive",
-      })
-    } finally {
-      setIsGenerating(false)
-    }
-  }
-
-  // Function to extract a diagram from the specification text
-  const extractDiagramFromSpecification = (specData) => {
-    // Look for mermaid diagram in system_architecture section
-    if (specData.system_architecture) {
-      // Try to find a mermaid diagram in the system_architecture field
-      const mermaidMatch = specData.system_architecture.match(/```mermaid\s*([\s\S]*?)\s*```/)
-      if (mermaidMatch && mermaidMatch[1]) {
-        return mermaidMatch[1].trim()
-      }
-
-      // Try to find a graph pattern without mermaid markers
-      const graphMatch = specData.system_architecture.match(/graph\s+[A-Z]+\s*([\s\S]*?)(?:\n\n|\n$|$)/)
-      if (graphMatch && graphMatch[0]) {
-        return graphMatch[0].trim()
-      }
-    }
-
-    // If no diagram found in system_architecture, try to find it in the entire specification
-    const allText = [
-      specData.app_description,
-      specData.functional_requirements,
-      specData.non_functional_requirements,
-      specData.system_architecture,
-      specData.database_schema,
-      specData.api_endpoints,
-      specData.user_stories,
-    ]
-      .filter(Boolean)
-      .join("\n\n")
-
-    // Look for mermaid diagram in the entire text
-    const mermaidMatch = allText.match(/```mermaid\s*([\s\S]*?)\s*```/)
-    if (mermaidMatch && mermaidMatch[1]) {
-      // Check if it's an architecture diagram (contains graph LR or graph TD)
-      const diagramContent = mermaidMatch[1].trim()
-      if (diagramContent.includes("graph LR") || diagramContent.includes("graph TD")) {
-        return diagramContent
-      }
-    }
-
-    return null
-  }
-
-  // Function to generate a diagram with AI based on the specification
-  const generateDiagramWithAI = async (specData) => {
-    try {
       // Prepare a prompt for the AI based on the specification
-      const prompt = `
-Generate a Mermaid diagram for the system architecture of the following application:
+      let prompt = `
+Generate a detailed Mermaid diagram for the system architecture of the following application:
 
 App Name: ${specData.app_name || "Unknown"}
 App Type: ${specData.app_type || "web"}
 Description: ${specData.app_description || ""}
-
-${specData.system_architecture ? `System Architecture Description: ${specData.system_architecture}` : ""}
-${specData.technical_constraints ? `Technical Constraints: ${specData.technical_constraints}` : ""}
-
-Please generate a Mermaid diagram using the 'graph LR' or 'graph TD' syntax that shows the system architecture.
-Include components like frontend, backend, databases, APIs, and any third-party services.
-Show the relationships between components with arrows.
-Use subgraphs to group related components.
-
-IMPORTANT FORMATTING RULES:
-1. Start with "graph LR" or "graph TD" on its own line
-2. Put each subgraph declaration on its own line
-3. Enclose subgraph names in quotes, especially if they contain spaces or special characters
-4. Enclose node text in quotes if it contains spaces or special characters
-5. Put each node and connection on its own line
-6. End each subgraph with "end" on its own line - MAKE SURE "end" IS ON ITS OWN LINE
-7. Use proper spacing around arrows (e.g., "A --> B" not "A-->B")
-8. Put comments on their own lines, not at the end of other lines
-9. NEVER use "endsubgraph" - always use "end" on its own line
-10. For multiple connections, use separate lines (e.g., "A --> B" and "B --> C" not "A --> B --> C")
-
-Do not include any explanatory text, only the Mermaid diagram code.
 `
 
-      // Make a request to the AI API
-      const response = await fetch("/api/generate-code", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          activeTab: "manual",
-          requirements: prompt,
-          language: "mermaid",
-          framework: "diagram",
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to generate diagram with AI")
+      // Include the system architecture description if available
+      if (specData.system_architecture) {
+        prompt += `
+System Architecture Description:
+${specData.system_architecture}
+`
       }
 
-      const data = await response.json()
+      prompt += `
+Consider the following aspects when generating the diagram:
+- Key components and their responsibilities
+- Interactions between components
+- Data flow and storage
+- External dependencies and integrations
+- Scalability and performance considerations
+- Security aspects
 
-      // Extract the Mermaid diagram from the response
-      let diagramCode = data.code
+Requirements:
+1. Use the 'graph TD' syntax for the Mermaid diagram
+2. Include appropriate components based on the app type (${specData.app_type || "web"}). For example, for a web application, include components like:
+   - Frontend (Web Browser, ReactJS App)
+   - Backend (API Gateway, Node.js Server, Authentication Service)
+   - Data Storage (SQL Database, NoSQL Database, Cache)
+3. Show connections between components with arrows (-->) and label them with the type of interaction (e.g., HTTP, REST API, Database Query)
+4. Use subgraphs to organize related components
+5. Use simple node names like A, B, C with descriptive labels in square brackets
+6. Ensure proper spacing and formatting
+7. Include at least 10 components to show a complex architecture
 
-      // Clean up the response to extract just the Mermaid diagram
-      const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(graph[\s\S]*?)```/)
-      if (mermaidMatch && mermaidMatch[1]) {
-        diagramCode = mermaidMatch[1].trim()
-      } else {
-        // If no mermaid code block found, look for graph LR or graph TD
-        const flowchartMatch = diagramCode.match(/(graph\s+(?:LR|TD)[\s\S]*?)(?:\n\n|\n$|$)/)
-        if (flowchartMatch && flowchartMatch[1]) {
-          diagramCode = flowchartMatch[1].trim()
+Your response should ONLY contain the Mermaid diagram code, nothing else.
+Do not include any explanations, markdown formatting, or code blocks.
+Start directly with 'graph TD' and end with the last line of the diagram.
+`
+
+      console.log("Generating system architecture with AI...")
+
+      try {
+        // Use the API route to generate the diagram
+        const aiResult = await generateAIText(
+          prompt,
+          "You are an expert system architect who creates clear and accurate Mermaid diagrams.",
+          {
+            provider,
+            temperature: 0.7, // Use a slightly higher temperature for creativity
+            apiKey: apiKey, // Pass the API key from localStorage
+          },
+        )
+
+        if (aiResult.success && aiResult.text) {
+          setDiagramCode(aiResult.text)
+          toast({
+            title: "System architecture generated",
+            description: "AI has generated a system architecture based on your specification",
+          })
         } else {
-          const graphMatch = diagramCode.match(/(graph\s+(?:TD|LR)[\s\S]*?)(?:\n\n|\n$|$)/)
-          if (graphMatch && graphMatch[1]) {
-            diagramCode = graphMatch[1].trim()
-          }
+          throw new Error(aiResult.error || "Failed to generate diagram with AI")
         }
+      } catch (apiError) {
+        console.error("API error:", apiError)
+
+        // Generate a simple diagram based on the app type as a fallback
+        let fallbackDiagram = DEFAULT_DIAGRAMS.web
+
+        if (specData.app_type?.toLowerCase().includes("mobile")) {
+          fallbackDiagram = DEFAULT_DIAGRAMS.mobile
+        } else if (
+          specData.app_type?.toLowerCase().includes("ecommerce") ||
+          specData.app_type?.toLowerCase().includes("e-commerce")
+        ) {
+          fallbackDiagram = DEFAULT_DIAGRAMS.ecommerce
+        } else {
+          fallbackDiagram = DEFAULT_DIAGRAMS.web
+        }
+
+        setDiagramCode(fallbackDiagram)
+        toast({
+          title: "Using template diagram",
+          description: "AI generation failed. Using a template instead.",
+          variant: "default",
+        })
       }
-
-      // If we still don't have a valid diagram, generate a default one
-      if (!diagramCode.includes("graph")) {
-        return generateDefaultDiagram(specData)
-      }
-
-      // Fix any "endsubgraph" issues before returning
-      diagramCode = diagramCode.replace(/endsubgraph/g, "end\nsubgraph")
-
-      return diagramCode
     } catch (error) {
-      console.error("Error generating diagram with AI:", error)
-      // Fallback to a default diagram
-      return generateDefaultDiagram(specData)
+      console.error("Error generating system architecture:", error)
+
+      // Use a default diagram as fallback
+      if (selectedSpecification?.app_type) {
+        const appType = selectedSpecification.app_type.toLowerCase()
+        if (appType.includes("mobile")) {
+          setDiagramCode(DEFAULT_DIAGRAMS.mobile)
+        } else if (appType.includes("ecommerce") || appType.includes("e-commerce")) {
+          setDiagramCode(DEFAULT_DIAGRAMS.ecommerce)
+        } else {
+          setDiagramCode(DEFAULT_DIAGRAMS.web)
+        }
+      } else {
+        setDiagramCode(DEFAULT_DIAGRAMS.web)
+      }
+
+      toast({
+        title: "Using template diagram",
+        description: "Failed to generate custom diagram. Using a template instead.",
+        variant: "default",
+      })
+    } finally {
+      setIsGenerating(false)
     }
   }
 
@@ -326,6 +405,7 @@ Do not include any explanatory text, only the Mermaid diagram code.
           })
         } else if (result.error && (result.error.includes("column") || result.error.includes("schema"))) {
           // This is a schema error
+          setSchemaWarning(result.error)
           toast({
             title: "Database Schema Error",
             description:
@@ -367,91 +447,6 @@ Do not include any explanatory text, only the Mermaid diagram code.
       setIsSubmitting(false)
     }
   }
-
-  // Function to generate a default diagram based on the specification data
-  const generateDefaultDiagram = (specData) => {
-    const appName = specData.app_name || "Application"
-    const appType = specData.app_type || "web"
-    console.log(`Generating component diagram for ${appType} application: ${appName}`)
-
-    let generatedDiagram = `flowchart TD\n`
-
-    // Add frontend components based on app type
-    generatedDiagram += `  subgraph "Frontend"\n`
-
-    if (appType === "ecommerce") {
-      generatedDiagram += `    UI["User Interface"]\n    ProductList["Product Listing"]\n    ProductDetail["Product Detail"]\n    Cart["Shopping Cart"]\n    Checkout["Checkout Process"]\n    UserProfile["User Profile"]\n`
-    } else if (appType === "crm") {
-      generatedDiagram += `    UI["User Interface"]\n    Dashboard["Dashboard"]\n    ContactList["Contact Management"]\n    LeadList["Lead Management"]\n    Calendar["Calendar"]\n    Reports["Reports"]\n`
-    } else if (appType === "mobile") {
-      generatedDiagram += `    UI["Mobile UI"]\n    Navigation["Navigation"]\n    Screens["App Screens"]\n    StateManager["State Management"]\n    LocalStorage["Local Storage"]\n    Notifications["Push Notifications"]\n`
-    } else {
-      generatedDiagram += `    UI["User Interface"]\n    Auth["Authentication UI"]\n    Dashboard["Dashboard"]\n    Forms["Form Components"]\n    UserProfile["User Profile"]\n`
-    }
-
-    generatedDiagram += `  end\n\n`
-
-    // Add backend components
-    generatedDiagram += `  subgraph "Backend"\n`
-
-    if (appType === "ecommerce") {
-      generatedDiagram += `    API["API Gateway"]\n    ProductService["Product Service"]\n    CartService["Cart Service"]\n    OrderService["Order Service"]\n    PaymentService["Payment Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
-    } else if (appType === "crm") {
-      generatedDiagram += `    API["API Gateway"]\n    ContactService["Contact Service"]\n    LeadService["Lead Service"]\n    CalendarService["Calendar Service"]\n    ReportService["Report Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
-    } else if (appType === "mobile") {
-      generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    DataService["Data Service"]\n    SyncService["Sync Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
-    } else {
-      generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    ContentService["Content Service"]\n    UserService["User Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
-    }
-
-    generatedDiagram += `  end\n\n`
-
-    // Add connections between components
-    if (appType === "ecommerce") {
-      generatedDiagram += `  UI --> ProductList\n  UI --> ProductDetail\n  UI --> Cart\n  UI --> Checkout\n  UI --> UserProfile\n\n`
-      generatedDiagram += `  ProductList --> API\n  ProductDetail --> API\n  Cart --> API\n  Checkout --> API\n  UserProfile --> API\n\n`
-      generatedDiagram += `  API --> ProductService\n  API --> CartService\n  API --> OrderService\n  API --> PaymentService\n  UserService --> DB\n\n`
-      generatedDiagram += `  ProductService --> DB\n  CartService --> DB\n  OrderService --> DB\n  PaymentService --> DB\n  UserService --> DB\n`
-    } else if (appType === "crm") {
-      generatedDiagram += `  UI --> Dashboard\n  UI --> ContactList\n  UI --> LeadList\n  UI --> Calendar\n  UI --> Reports\n\n`
-      generatedDiagram += `  Dashboard --> API\n  ContactList --> API\n  LeadList --> API\n  Calendar --> API\n  Reports --> API\n\n`
-      generatedDiagram += `  API --> ContactService\n  API --> LeadService\n  API --> CalendarService\n  ReportService --> API\n  UserService --> DB\n\n`
-      generatedDiagram += `  ContactService --> DB\n  LeadService --> DB\n  CalendarService --> DB\n  ReportService --> DB\n  UserService --> DB\n`
-    } else if (appType === "mobile") {
-      generatedDiagram += `  UI --> Navigation\n  Navigation --> Screens\n  Screens --> StateManager\n  StateManager --> LocalStorage\n  StateManager --> API\n\n`
-      generatedDiagram += `  API --> AuthService\n  API --> DataService\n  API --> SyncService\n  API --> NotificationService\n\n`
-      generatedDiagram += `  AuthService --> DB\n  DataService --> DB\n  SyncService --> DB\n  NotificationService --> DB\n`
-    } else {
-      generatedDiagram += `  UI --> Auth\n  UI --> Dashboard\n  UI --> Forms\n  UserProfile --> API\n\n`
-      generatedDiagram += `  Auth --> API\n  Dashboard --> API\n  Forms --> API\n  UserProfile --> API\n\n`
-      generatedDiagram += `  API --> AuthService\n  API --> ContentService\n  API --> UserService\n  API --> NotificationService\n\n`
-      generatedDiagram += `  AuthService --> DB\n  ContentService --> DB\n  UserService --> DB\n  NotificationService --> DB\n`
-    }
-
-    console.log("Generated component diagram successfully")
-    return generatedDiagram
-  }
-
-  // Function to format the diagram code
-  const formatDiagram = (diagramCode) => {
-    // Trim leading/trailing whitespace
-    diagramCode = diagramCode.trim()
-
-    // Ensure that the diagram starts with "graph"
-    if (
-      !diagramCode.startsWith("graph LR") &&
-      !diagramCode.startsWith("graph TD") &&
-      !diagramCode.startsWith("flowchart TD")
-    ) {
-      diagramCode = "flowchart TD\n" + diagramCode
-    }
-
-    // Add a newline character at the end of each line
-    diagramCode = diagramCode.split("\n").join("\n")
-
-    return diagramCode
-  }
-
   return (
     <div className="space-y-6">
       <Card>
@@ -472,6 +467,18 @@ Do not include any explanatory text, only the Mermaid diagram code.
                 <p className="text-sm">{fetchError}</p>
                 <p className="text-sm mt-1">
                   Please check your Supabase connection and make sure your environment variables are set correctly.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {apiKeyMissing && (
+            <div className="mb-4 p-4 border border-amber-200 bg-amber-50 rounded-md flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="h-5 w-5" />
+              <div>
+                <p className="font-medium">OpenAI API Key Missing</p>
+                <p className="text-sm">
+                  Please add your OpenAI API key in the Settings page to use AI generation features.
                 </p>
               </div>
             </div>
@@ -514,6 +521,11 @@ Do not include any explanatory text, only the Mermaid diagram code.
                 <p className="text-xs text-muted-foreground mt-1">{selectedSpecification.app_description}</p>
               </div>
             )}
+            {selectedSpecification?.system_architecture && (
+              <div className="mt-2 p-3 bg-muted rounded-md">
+                <p className="text-sm font-medium">System Architecture: {selectedSpecification.system_architecture}</p>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end mb-4 gap-2">
@@ -524,7 +536,7 @@ Do not include any explanatory text, only the Mermaid diagram code.
             <Button
               variant="outline"
               onClick={generateFromSpecification}
-              disabled={isGenerating || !specificationId}
+              disabled={isGenerating || !specificationId || apiKeyMissing}
               className="gap-2"
             >
               {isGenerating ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
@@ -553,13 +565,7 @@ Do not include any explanatory text, only the Mermaid diagram code.
             <div>
               <div className="text-sm font-medium mb-2">Preview:</div>
               <div className="border rounded-md p-4 h-[400px] overflow-auto bg-white">
-                {diagramCode ? (
-                  <MermaidDiagram code={diagramCode} className="h-full w-full" />
-                ) : (
-                  <div className="flex items-center justify-center h-full text-muted-foreground">
-                    No diagram to preview. Generate or enter a diagram.
-                  </div>
-                )}
+                <MermaidDiagram code={diagramCode} className="h-full w-full" />
               </div>
             </div>
           </div>
@@ -567,87 +573,4 @@ Do not include any explanatory text, only the Mermaid diagram code.
       </Card>
     </div>
   )
-}
-
-// Update the generateDefaultDiagram function to ensure proper formatting
-const generateDefaultDiagram = (specData) => {
-  const appName = specData.app_name || "Application"
-  const appType = specData.app_type || "web"
-  console.log(`Generating component diagram for ${appType} application: ${appName}`)
-
-  let generatedDiagram = `flowchart TD\n`
-
-  // Add frontend components based on app type
-  generatedDiagram += `  subgraph "Frontend"\n`
-
-  if (appType === "ecommerce") {
-    generatedDiagram += `    UI["User Interface"]\n    ProductList["Product Listing"]\n    ProductDetail["Product Detail"]\n    Cart["Shopping Cart"]\n    Checkout["Checkout Process"]\n    UserProfile["User Profile"]\n`
-  } else if (appType === "crm") {
-    generatedDiagram += `    UI["User Interface"]\n    Dashboard["Dashboard"]\n    ContactList["Contact Management"]\n    LeadList["Lead Management"]\n    Calendar["Calendar"]\n    Reports["Reports"]\n`
-  } else if (appType === "mobile") {
-    generatedDiagram += `    UI["Mobile UI"]\n    Navigation["Navigation"]\n    Screens["App Screens"]\n    StateManager["State Management"]\n    LocalStorage["Local Storage"]\n    Notifications["Push Notifications"]\n`
-  } else {
-    generatedDiagram += `    UI["User Interface"]\n    Auth["Authentication UI"]\n    Dashboard["Dashboard"]\n    Forms["Form Components"]\n    UserProfile["User Profile"]\n`
-  }
-
-  generatedDiagram += `  end\n\n`
-
-  // Add backend components
-  generatedDiagram += `  subgraph "Backend"\n`
-
-  if (appType === "ecommerce") {
-    generatedDiagram += `    API["API Gateway"]\n    ProductService["Product Service"]\n    CartService["Cart Service"]\n    OrderService["Order Service"]\n    PaymentService["Payment Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
-  } else if (appType === "crm") {
-    generatedDiagram += `    API["API Gateway"]\n    ContactService["Contact Service"]\n    LeadService["Lead Service"]\n    CalendarService["Calendar Service"]\n    ReportService["Report Service"]\n    UserService["User Service"]\n    DB["Database"]\n`
-  } else if (appType === "mobile") {
-    generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    DataService["Data Service"]\n    SyncService["Sync Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
-  } else {
-    generatedDiagram += `    API["API Gateway"]\n    AuthService["Auth Service"]\n    ContentService["Content Service"]\n    UserService["User Service"]\n    NotificationService["Notification Service"]\n    DB["Database"]\n`
-  }
-
-  generatedDiagram += `  end\n\n`
-
-  // Add connections between components
-  if (appType === "ecommerce") {
-    generatedDiagram += `  UI --> ProductList\n  UI --> ProductDetail\n  UI --> Cart\n  UI --> Checkout\n  UI --> UserProfile\n\n`
-    generatedDiagram += `  ProductList --> API\n  ProductDetail --> API\n  Cart --> API\n  Checkout --> API\n  UserProfile --> API\n\n`
-    generatedDiagram += `  API --> ProductService\n  API --> CartService\n  API --> OrderService\n  API --> PaymentService\n  UserService --> DB\n\n`
-    generatedDiagram += `  ProductService --> DB\n  CartService --> DB\n  OrderService --> DB\n  PaymentService --> DB\n  UserService --> DB\n`
-  } else if (appType === "crm") {
-    generatedDiagram += `  UI --> Dashboard\n  UI --> ContactList\n  UI --> LeadList\n  UI --> Calendar\n  UI --> Reports\n\n`
-    generatedDiagram += `  Dashboard --> API\n  ContactList --> API\n  LeadList --> API\n  Calendar --> API\n  Reports --> API\n\n`
-    generatedDiagram += `  API --> ContactService\n  API --> LeadService\n  API --> CalendarService\n  ReportService --> API\n  UserService --> DB\n\n`
-    generatedDiagram += `  ContactService --> DB\n  LeadService --> DB\n  CalendarService --> DB\n  ReportService --> DB\n  UserService --> DB\n`
-  } else if (appType === "mobile") {
-    generatedDiagram += `  UI --> Navigation\n  Navigation --> Screens\n  Screens --> StateManager\n  StateManager --> LocalStorage\n  StateManager --> API\n\n`
-    generatedDiagram += `  API --> AuthService\n  API --> DataService\n  API --> SyncService\n  API --> NotificationService\n\n`
-    generatedDiagram += `  AuthService --> DB\n  DataService --> DB\n  SyncService --> DB\n  NotificationService --> DB\n`
-  } else {
-    generatedDiagram += `  UI --> Auth\n  UI --> Dashboard\n  UI --> Forms\n  UserProfile --> API\n\n`
-    generatedDiagram += `  Auth --> API\n  Dashboard --> API\n  Forms --> API\n  UserProfile --> API\n\n`
-    generatedDiagram += `  API --> AuthService\n  API --> ContentService\n  API --> UserService\n  API --> NotificationService\n\n`
-    generatedDiagram += `  AuthService --> DB\n  ContentService --> DB\n  UserService --> DB\n  NotificationService --> DB\n`
-  }
-
-  console.log("Generated component diagram successfully")
-  return generatedDiagram
-}
-
-function formatDiagram(diagramCode) {
-  // Trim leading/trailing whitespace
-  diagramCode = diagramCode.trim()
-
-  // Ensure the diagram starts with "graph LR" or "graph TD"
-  if (
-    !diagramCode.startsWith("graph LR") &&
-    !diagramCode.startsWith("graph TD") &&
-    !diagramCode.startsWith("flowchart TD")
-  ) {
-    diagramCode = "flowchart TD\n" + diagramCode
-  }
-
-  // Add a newline character at the end of each line
-  diagramCode = diagramCode.split("\n").join("\n")
-
-  return diagramCode
 }

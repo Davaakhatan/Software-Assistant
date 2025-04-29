@@ -1,3 +1,13 @@
 {
-  "version": 2
+  "functions": {
+    "app/api/code-simple-fallback/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/save-code/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/generate-specification/route.ts": {
+      "maxDuration": 60
+    }
+  }
 }
