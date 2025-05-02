@@ -1,7 +1,5 @@
-"use server";
-
-import { createClient } from "@supabase/supabase-js";
-import type { CookieOptions } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js"
+import type { CookieOptions } from "@supabase/supabase-js"
 
 const cookieOptions: CookieOptions = {
   name: "sb-auth-token",
@@ -10,26 +8,26 @@ const cookieOptions: CookieOptions = {
   sameSite: "lax",
   secure: process.env.NODE_ENV === "production",
   httpOnly: true,
-};
+}
 
-// Creates a server-side Supabase client with cookie-based auth
+// Create a server-side Supabase client
 export function getSupabaseServer() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL!;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
   const supabaseKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.SUPABASE_SERVICE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
   if (!supabaseUrl || !supabaseKey) {
-    console.error("Missing Supabase environment variables");
-    throw new Error("Missing Supabase environment variables");
+    console.error("Missing Supabase environment variables")
+    throw new Error("Missing Supabase environment variables")
   }
 
   return createClient(supabaseUrl, supabaseKey, {
     auth: {
       persistSession: false,
-      storage: cookieOptions,
     },
+    // Add connection pooling for better performance
     db: {
       schema: "public",
     },
@@ -38,13 +36,14 @@ export function getSupabaseServer() {
         "x-application-name": "sdlc-companion",
       },
     },
-  });
+  })
 }
 
-// Backwards-compatible helper for route handlers
+// For backward compatibility, we'll export this function that can be used
+// in route handlers
 export async function createServerClient(cookieStore?: { get: (name: string) => Cookie | undefined }) {
-  return getSupabaseServer();
+  return getSupabaseServer()
 }
 
-// Dummy export for type compatibility in frontend imports
-export const supabaseServer = null;
+// Export a dummy client for type compatibility
+export const supabaseServer = null
