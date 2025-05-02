@@ -24,9 +24,8 @@ export async function generateAIText(
       throw new Error("OpenAI API key is missing or invalid")
     }
 
-    // Use a simple string concatenation instead of URL constructor
-    // This avoids potential URL parsing issues
-    const apiUrl = `${window.location.origin}/api/generate-specification`
+    // Use absolute URL path without any URL constructor
+    const apiUrl = "/api/generate-specification"
 
     console.log("API URL being used:", apiUrl) // For debugging
 

@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       { role: "user", content: prompt },
     ]
 
-    // Call OpenAI API directly using fetch
+    // Call OpenAI API directly using fetch with a hardcoded URL
     const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {

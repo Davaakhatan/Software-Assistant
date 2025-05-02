@@ -39,6 +39,7 @@ export async function generateAIText(
   systemPrompt = "",
   options: {
     temperature?: number
+    apiKey?: string
   } = {},
 ): Promise<{ success: boolean; text?: string; error?: string }> {
   try {
@@ -63,6 +64,7 @@ export async function generateAIText(
     }
 
     // Use our server-side API endpoint instead of direct OpenAI calls
+    // Use a simple path without URL constructor
     const response = await fetch("/api/generate-specification", {
       method: "POST",
       headers: {
