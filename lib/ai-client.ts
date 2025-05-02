@@ -1,4 +1,4 @@
-"\"use client"
+"use client"
 
 // Client-side AI service for generating text
 export async function generateAIText(
@@ -21,7 +21,7 @@ export async function generateAIText(
     }
 
     // First try with a relative URL
-    let url = "/api/chat"
+    let url = "/api/generate-specification"
     console.log("Attempting to fetch with relative URL:", url)
 
     try {
@@ -31,7 +31,7 @@ export async function generateAIText(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: [{ role: "user", content: prompt }],
+          prompt,
           systemPrompt,
           temperature: options.temperature || 0.7,
           apiKey,
@@ -57,7 +57,7 @@ export async function generateAIText(
 
       // If relative URL fails, try with absolute URL
       const origin = window.location.origin
-      url = new URL("/api/chat", origin).toString()
+      url = new URL("/api/generate-specification", origin).toString()
       console.log("Retrying with absolute URL:", url)
 
       const response = await fetch(url, {
@@ -66,7 +66,7 @@ export async function generateAIText(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          messages: [{ role: "user", content: prompt }],
+          prompt,
           systemPrompt,
           temperature: options.temperature || 0.7,
           apiKey,
@@ -104,4 +104,11 @@ export async function generateAIText(
       error: error instanceof Error ? error.message : "An unexpected error occurred",
     }
   }
+}
+
+// Check if an API key is available in localStorage
+export function isApiKeyAvailable(): boolean {
+  if (typeof window === "undefined") return false
+  const apiKey = localStorage.getItem("openai_api_key")
+  return !!apiKey && apiKey.startsWith("sk-")
 }

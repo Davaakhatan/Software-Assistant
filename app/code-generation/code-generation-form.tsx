@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { generateCode, generateFromSpecificationAndDesign, saveGeneratedCode } from "./actions"
+import { generateCode, generateFromSpecificationAndDesign, saveGeneratedCode } from "@/lib/code-server"
 import { Loader2, Code, Save, Copy, Download } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
