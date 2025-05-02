@@ -24,9 +24,9 @@ export async function generateAIText(
       throw new Error("OpenAI API key is missing or invalid")
     }
 
-    // Construct the API URL using the current origin
-    // This ensures it works in both development and production
-    const apiUrl = new URL("/api/generate-specification", window.location.origin).toString()
+    // Use a simple string concatenation instead of URL constructor
+    // This avoids potential URL parsing issues
+    const apiUrl = `${window.location.origin}/api/generate-specification`
 
     console.log("API URL being used:", apiUrl) // For debugging
 
