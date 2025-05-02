@@ -24,8 +24,14 @@ export async function generateAIText(
       throw new Error("OpenAI API key is missing or invalid")
     }
 
-    // Use our server-side API endpoint instead of direct OpenAI calls
-    const response = await fetch("/api/generate-specification", {
+    // Always use a fully qualified URL
+    // This is critical for environments where relative URLs aren't accepted
+    const origin = window.location.origin
+    const absoluteUrl = `${origin}/api/generate-specification`
+
+    console.log("Using absolute URL:", absoluteUrl)
+
+    const response = await fetch(absoluteUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -39,8 +45,16 @@ export async function generateAIText(
     })
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.error || `HTTP error ${response.status}`)
+      let errorMessage = `HTTP error ${response.status}`
+      try {
+        const errorData = await response.json()
+        if (errorData.error) {
+          errorMessage = errorData.error
+        }
+      } catch (e) {
+        // If parsing JSON fails, use the default error message
+      }
+      throw new Error(errorMessage)
     }
 
     const data = await response.json()

@@ -9,7 +9,10 @@ export default async function CodeGenerationPage() {
   const supabase = getSupabaseServer()
 
   // Fetch specifications
-  const { data: specifications } = await supabase.from("specifications").select("id, app_name")
+  const { data: specifications } = await supabase
+    .from("specifications")
+    .select("id, app_name")
+    .order("created_at", { ascending: false })
 
   // Fetch designs
   const { data: designs } = await supabase
