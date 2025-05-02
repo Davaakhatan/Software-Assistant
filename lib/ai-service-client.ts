@@ -24,14 +24,13 @@ export async function generateAIText(
       throw new Error("OpenAI API key is missing or invalid")
     }
 
-    // Always use a fully qualified URL
-    // This is critical for environments where relative URLs aren't accepted
-    const origin = window.location.origin
-    const absoluteUrl = `${origin}/api/generate-specification`
+    // Construct the API URL using the current origin
+    // This ensures it works in both development and production
+    const apiUrl = new URL("/api/generate-specification", window.location.origin).toString()
 
-    console.log("Using absolute URL:", absoluteUrl)
+    console.log("API URL being used:", apiUrl) // For debugging
 
-    const response = await fetch(absoluteUrl, {
+    const response = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
