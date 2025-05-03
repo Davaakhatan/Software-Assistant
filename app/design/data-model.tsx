@@ -114,11 +114,13 @@ User "1" -- "1" Profile : has`)
   const convertToSimpleSyntax = (code) => {
     if (!code) return ""
 
-    // If it's already in the simple format, return as is\
-    if (!code.includes("{\") && code.includes(\"class\") && code.includes(\":\") {
-      // Just clean up any comments or special characters
-      return cleanupDiagramCode(code)
+
+  // If it's already in the simple format, return as is
+  if (!code.includes("{") && code.includes("class") && code.includes(":")) {
+    // Just clean up any comments or special characters
+    return cleanupDiagramCode(code)
   }
+
 
   // Normalize line breaks
   let result = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
