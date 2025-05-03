@@ -13,6 +13,7 @@ import { getSpecifications, getSpecificationById } from "../specification-genera
 import { saveDesign } from "./actions"
 import { useAIProvider } from "@/context/ai-provider-context"
 import { generateDataModelDiagram } from "@/lib/openai-direct"
+import { generateAIText } from "@/lib/ai-service"
 
 export default function DataModel() {
   const { toast } = useToast()
@@ -113,431 +114,526 @@ User "1" -- "1" Profile : has`)
   const convertToSimpleSyntax = (code) => {
     if (!code) return ""
 
-    // If it's already in the simple format, return as is
-    if (!code.includes("{") && code.includes("class") && code.includes(":")) {
+    // If it's already in the simple format, return as is\
+    if (!code.includes("{\") && code.includes(\"class\") && code.includes(\":\") {
       // Just clean up any comments or special characters
       return cleanupDiagramCode(code)
-    }
+  }
 
-    // Normalize line breaks
-    let result = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+  // Normalize line breaks
+  let result = code.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
 
-    // Remove comments that are causing issues
-    result = result.replace(/\s*%%.*$/gm, "")
+  // Remove comments that are causing issues
+  result = result.replace(/\s*%%.*$/gm, "")
 
-    // Replace special characters in type definitions
-    result = result.replace(/~/g, ".")
+  // Replace special characters in type definitions
+  result = result.replace(/~/g, ".")
 
-    // Ensure classDiagram is at the beginning
-    if (!result.trim().startsWith("classDiagram")) {
-      result = "classDiagram\n" + result
-    }
+  // Ensure classDiagram is at the beginning
+  if (!result.trim().startsWith("classDiagram")) {
+    result = "classDiagram\n" + result
+  }
 
-    // Split into lines
-    const lines = result.split("\n")
-    const newLines = ["classDiagram"]
+  // Split into lines
+  const lines = result.split("\n")
+  const newLines = ["classDiagram"]
 
-    // Process each line
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim()
+  // Process each line
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
 
-      // Skip empty lines and the classDiagram declaration
-      if (!line || line === "classDiagram") continue
+    // Skip empty lines and the classDiagram declaration
+    if (!line || line === "classDiagram") continue
 
-      // Handle class definitions with curly braces
-      if (line.startsWith("class ") && line.includes("{")) {
-        // Extract class name
-        const className = line.substring(6, line.indexOf("{")).trim()
-        newLines.push(`class ${className}`)
+    // Handle class definitions with curly braces
+    if (line.startsWith("class ") && line.includes("{")) {
+      // Extract class name
+      const className = line.substring(6, line.indexOf("{")).trim()
+      newLines.push(`class ${className}`)
 
-        // Process class properties
-        let j = i + 1
-        while (j < lines.length && !lines[j].includes("}")) {
-          const propLine = lines[j].trim()
+      // Process class properties
+      let j = i + 1
+      while (j < lines.length && !lines[j].includes("}")) {
+        const propLine = lines[j].trim()
 
-          // If it's a property line (starts with + or -)
-          if (propLine.startsWith("+") || propLine.startsWith("-")) {
-            const propName = propLine.substring(1).trim()
-            newLines.push(`${className} : ${propName}`)
-          }
-
-          j++
+        // If it's a property line (starts with + or -)
+        if (propLine.startsWith("+") || propLine.startsWith("-")) {
+          const propName = propLine.substring(1).trim()
+          newLines.push(`${className} : ${propName}`)
         }
 
-        // Skip to after the closing brace
-        i = j
+        j++
       }
-      // Handle simple class declarations
-      else if (line.startsWith("class ") && !line.includes("{")) {
-        newLines.push(line)
-      }
-      // Handle relationships
-      else if (line.includes("--")) {
-        newLines.push(line)
-      }
-      // Handle class properties directly
-      else if (line.includes(" : ")) {
-        newLines.push(line)
-      }
-    }
 
-    return newLines.join("\n")
+      // Skip to after the closing brace
+      i = j
+    }
+    // Handle simple class declarations
+    else if (line.startsWith("class ") && !line.includes("{")) {
+      newLines.push(line)
+    }
+    // Handle relationships
+    else if (line.includes("--")) {
+      newLines.push(line)
+    }
+    // Handle class properties directly
+    else if (line.includes(" : ")) {
+      newLines.push(line)
+    }
   }
 
-  // Add a new function to clean up diagram code
-  const cleanupDiagramCode = (code) => {
-    if (!code) return ""
+  return newLines.join("\n")
+}
 
-    // Remove comments
-    let cleaned = code.replace(/\s*%%.*$/gm, "")
+// Add a new function to clean up diagram code
+const cleanupDiagramCode = (code) => {
+  if (!code) return ""
 
-    // Replace special characters
-    cleaned = cleaned.replace(/~/g, ".")
+  // Remove comments
+  let cleaned = code.replace(/\s*%%.*$/gm, "")
 
-    // Split into lines for better processing
-    const lines = cleaned.split("\n")
-    const newLines = []
+  // Replace special characters
+  cleaned = cleaned.replace(/~/g, ".")
 
-    // Process each line
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim()
+  // Split into lines for better processing
+  const lines = cleaned.split("\n")
+  const newLines = []
 
-      // Skip empty lines
-      if (!line) continue
+  // Process each line
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
 
-      // Keep class diagram declaration
-      if (line === "classDiagram" || line === "erDiagram") {
-        newLines.push(line)
-        continue
-      }
+    // Skip empty lines
+    if (!line) continue
 
-      // Handle class definitions and relationships
-      if (line.startsWith("class ") || line.includes(" -- ")) {
-        newLines.push(line)
-      }
-      // Handle class properties
-      else if (line.includes(" : ")) {
-        // Ensure there are no trailing comments or special characters
-        const cleanedLine = line.split("%%")[0].trim()
-        newLines.push(cleanedLine)
-      }
-      // Add other lines as is
-      else {
-        newLines.push(line)
-      }
+    // Keep class diagram declaration
+    if (line === "classDiagram" || line === "erDiagram") {
+      newLines.push(line)
+      continue
     }
 
-    return newLines.join("\n")
+    // Handle class definitions and relationships
+    if (line.startsWith("class ") || line.includes(" -- ")) {
+      newLines.push(line)
+    }
+    // Handle class properties
+    else if (line.includes(" : ")) {
+      // Ensure there are no trailing comments or special characters
+      const cleanedLine = line.split("%%")[0].trim()
+      newLines.push(cleanedLine)
+    }
+    // Add other lines as is
+    else {
+      newLines.push(line)
+    }
   }
 
-  const generateFromSpecification = async () => {
-    if (!specificationId) {
-      toast({
-        title: "Error",
-        description: "Please select a specification",
-        variant: "destructive",
-      })
-      return
+  return newLines.join("\n")
+}
+
+const generateFromSpecification = async () => {
+  if (!specificationId) {
+    toast({
+      title: "Error",
+      description: "Please select a specification",
+      variant: "destructive",
+    })
+    return
+  }
+
+  // Check if API key exists
+  const apiKey = localStorage.getItem("openai_api_key")
+  if (!apiKey || !apiKey.startsWith("sk-")) {
+    setApiKeyMissing(true)
+    toast({
+      title: "API Key Missing",
+      description: "Please add your OpenAI API key in the Settings page",
+      variant: "destructive",
+    })
+    return
+  }
+
+  setIsGenerating(true)
+  setPreviewError(null)
+  try {
+    // Get the specification details
+    const result = await getSpecificationById(specificationId)
+
+    if (!result.success) {
+      throw new Error(result.error || "Failed to get specification details")
     }
 
-    // Check if API key exists
-    const apiKey = localStorage.getItem("openai_api_key")
-    if (!apiKey || !apiKey.startsWith("sk-")) {
-      setApiKeyMissing(true)
-      toast({
-        title: "API Key Missing",
-        description: "Please add your OpenAI API key in the Settings page",
-        variant: "destructive",
-      })
-      return
-    }
+    const specData = result.data
 
-    setIsGenerating(true)
-    setPreviewError(null)
+    // Prepare a prompt for the AI based on the specification
+    const prompt = `
+Generate a Mermaid diagram for the data model of the following application:
+
+App Name: ${specData.app_name || "Unknown"}
+App Type: ${specData.app_type || "web"}
+Description: ${specData.app_description || ""}
+
+${
+  specData.database_schema
+    ? `# Database Schema
+${specData.database_schema}
+
+Please use the above database schema information to create an accurate data model.`
+    : ""
+}
+${specData.functional_requirements ? `Functional Requirements: ${specData.functional_requirements}` : ""}
+
+Please generate a Mermaid diagram using the 'classDiagram' syntax that shows the data model.
+If a database schema is provided above, use it as the primary source for creating the diagram.
+Include all tables mentioned in the schema with their fields and relationships.
+Do not use curly braces {} for class definitions.
+Instead, define each property on a separate line with the class name followed by a colon.
+Show relationships between entities with proper cardinality (one-to-one, one-to-many, many-to-many).
+Do not include any explanatory text, only the Mermaid diagram code.
+Do not use comments (lines starting with %%) in the diagram.
+Do not use the tilde (~) character, use dot (.) instead for nested types.
+`
+
+    console.log("Generating diagram with AI")
+
+    // First try using our API route
     try {
-      // Get the specification details
-      const result = await getSpecificationById(specificationId)
-
-      if (!result.success) {
-        throw new Error(result.error || "Failed to get specification details")
-      }
-
-      const specData = result.data
-
-      // Use the direct OpenAI implementation
-      const aiResult = await generateDataModelDiagram(
-        specData.app_name || "Unknown",
-        specData.app_type || "web",
-        specData.app_description || "",
-        specData.database_schema || "",
+      const aiResult = await generateAIText(
+        prompt,
+        "You are a database architect expert in creating Mermaid diagrams for data models.",
         {
+          provider,
           temperature,
-          apiKey,
+          apiKey: apiKey,
         },
       )
 
-      if (aiResult.success && aiResult.diagram) {
+      if (aiResult.success && aiResult.text) {
+        // Extract the Mermaid diagram from the response
+        let diagramCode = aiResult.text
+
+        // Clean up the response to extract just the Mermaid diagram
+        const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(classDiagram[\s\S]*?)```/)
+        if (mermaidMatch && mermaidMatch[1]) {
+          diagramCode = mermaidMatch[1].trim()
+        } else {
+          // If no mermaid code block found, look for classDiagram or erDiagram
+          const classMatch = diagramCode.match(/(classDiagram[\s\S]*?)(?=\n\s*\n|$)/)
+          if (classMatch && classMatch[1]) {
+            diagramCode = classMatch[1].trim()
+          } else {
+            const erMatch = diagramCode.match(/(erDiagram[\s\S]*?)(?=\n\s*\n|$)/)
+            if (erMatch && erMatch[1]) {
+              diagramCode = erMatch[1].trim()
+            }
+          }
+        }
+
+        // If we still don't have a valid diagram, generate a default one
+        if (!diagramCode.includes("classDiagram") && !diagramCode.includes("erDiagram")) {
+          console.log("AI didn't generate a valid diagram, using fallback")
+          diagramCode = generateDefaultDiagram(specData)
+        }
+
         // Convert to simple syntax
-        const simplifiedDiagram = convertToSimpleSyntax(aiResult.diagram)
+        const simplifiedDiagram = convertToSimpleSyntax(diagramCode)
         setDiagramCode(simplifiedDiagram)
 
         toast({
           title: "Data model generated",
           description: "Data model has been generated based on the selected specification.",
         })
-      } else {
-        throw new Error(aiResult.error || "Failed to generate diagram with AI")
+        return
       }
-    } catch (error) {
-      console.error("Error generating data model:", error)
-      setPreviewError(error.message)
-      toast({
-        title: "Error",
-        description: error.message || "Failed to generate data model",
-        variant: "destructive",
-      })
-    } finally {
-      setIsGenerating(false)
+    } catch (apiError) {
+      console.error("Error using API route, falling back to direct OpenAI call:", apiError)
+      // Continue to fallback
     }
-  }
 
-  // Function to generate a default diagram based on the specification data
-  const generateDefaultDiagram = (specData) => {
-    const appName = specData.app_name || "Application"
-    const appType = specData.app_type || "web"
+    // If we get here, the API route failed, so try direct OpenAI call
+    console.log("Falling back to direct OpenAI call")
+    const directResult = await generateDataModelDiagram(
+      specData.app_name || "Unknown",
+      specData.app_type || "web",
+      specData.app_description || "",
+      specData.database_schema || "",
+      {
+        temperature,
+        apiKey,
+      },
+    )
 
-    let diagram = `classDiagram\n`
+    if (directResult.success && directResult.diagram) {
+      // Convert to simple syntax
+      const simplifiedDiagram = convertToSimpleSyntax(directResult.diagram)
+      setDiagramCode(simplifiedDiagram)
 
-    // Add User class for all app types
-    diagram += `  class User\n`
-    diagram += `  User : +String id\n`
-    diagram += `  User : +String name\n`
-    diagram += `  User : +String email\n`
-    diagram += `  User : +String password\n`
-    diagram += `  User : +Date createdAt\n`
-    diagram += `  User : +Date updatedAt\n\n`
-
-    // Add Profile class for all app types
-    diagram += `  class Profile\n`
-    diagram += `  Profile : +String id\n`
-    diagram += `  Profile : +String userId\n`
-    diagram += `  Profile : +String bio\n`
-    diagram += `  Profile : +String avatar\n`
-    diagram += `  Profile : +Date createdAt\n`
-    diagram += `  Profile : +Date updatedAt\n\n`
-
-    // Add app-specific classes based on app type
-    if (appType === "ecommerce") {
-      // Product class
-      diagram += `  class Product\n`
-      diagram += `  Product : +String id\n`
-      diagram += `  Product : +String name\n`
-      diagram += `  Product : +String description\n`
-      diagram += `  Product : +Float price\n`
-      diagram += `  Product : +Int stock\n`
-      diagram += `  Product : +String[] images\n`
-      diagram += `  Product : +String categoryId\n`
-      diagram += `  Product : +Date createdAt\n`
-      diagram += `  Product : +Date updatedAt\n\n`
-
-      // Category class
-      diagram += `  class Category\n`
-      diagram += `  Category : +String id\n`
-      diagram += `  Category : +String name\n`
-      diagram += `  Category : +String description\n`
-      diagram += `  Category : +String slug\n`
-      diagram += `  Category : +Date createdAt\n`
-      diagram += `  Category : +Date updatedAt\n\n`
-
-      // Order class
-      diagram += `  class Order\n`
-      diagram += `  Order : +String id\n`
-      diagram += `  Order : +String userId\n`
-      diagram += `  Order : +Float total\n`
-      diagram += `  Order : +String status\n`
-      diagram += `  Order : +String shippingAddress\n`
-      diagram += `  Order : +String paymentMethod\n`
-      diagram += `  Order : +Date createdAt\n`
-      diagram += `  Order : +Date updatedAt\n\n`
-
-      // OrderItem class
-      diagram += `  class OrderItem\n`
-      diagram += `  OrderItem : +String id\n`
-      diagram += `  OrderItem : +String orderId\n`
-      diagram += `  OrderItem : +String productId\n`
-      diagram += `  OrderItem : +Int quantity\n`
-      diagram += `  OrderItem : +Float price\n`
-      diagram += `  OrderItem : +Date createdAt\n`
-      diagram += `  OrderItem : +Date updatedAt\n\n`
-
-      // Add relationships
-      diagram += `  User "1" -- "1" Profile : has\n`
-      diagram += `  User "1" -- "many" Order : places\n`
-      diagram += `  Order "1" -- "many" OrderItem : contains\n`
-      diagram += `  OrderItem "many" -- "1" Product : references\n`
-      diagram += `  Product "many" -- "1" Category : belongs to\n`
-    } else if (appType === "crm") {
-      // Contact class
-      diagram += `  class Contact\n`
-      diagram += `  Contact : +String id\n`
-      diagram += `  Contact : +String userId\n`
-      diagram += `  Contact : +String name\n`
-      diagram += `  Contact : +String email\n`
-      diagram += `  Contact : +String phone\n`
-      diagram += `  Contact : +String company\n`
-      diagram += `  Contact : +String status\n`
-      diagram += `  Contact : +Date createdAt\n`
-      diagram += `  Contact : +Date updatedAt\n\n`
-
-      // Lead class
-      diagram += `  class Lead\n`
-      diagram += `  Lead : +String id\n`
-      diagram += `  Lead : +String userId\n`
-      diagram += `  Lead : +String contactId\n`
-      diagram += `  Lead : +String name\n`
-      diagram += `  Lead : +String source\n`
-      diagram += `  Lead : +Float value\n`
-      diagram += `  Lead : +String status\n`
-      diagram += `  Lead : +Date createdAt\n`
-      diagram += `  Lead : +Date updatedAt\n\n`
-
-      // Deal class
-      diagram += `  class Deal\n`
-      diagram += `  Deal : +String id\n`
-      diagram += `  Deal : +String userId\n`
-      diagram += `  Deal : +String leadId\n`
-      diagram += `  Deal : +String name\n`
-      diagram += `  Deal : +Float value\n`
-      diagram += `  Deal : +String stage\n`
-      diagram += `  Deal : +Date closingDate\n`
-      diagram += `  Deal : +Date createdAt\n`
-      diagram += `  Deal : +Date updatedAt\n\n`
-
-      // Add relationships
-      diagram += `  User "1" -- "1" Profile : has\n`
-      diagram += `  User "1" -- "many" Contact : manages\n`
-      diagram += `  User "1" -- "many" Lead : manages\n`
-      diagram += `  User "1" -- "many" Deal : manages\n`
-      diagram += `  Contact "1" -- "many" Lead : associated with\n`
-      diagram += `  Lead "1" -- "many" Deal : converts to\n`
-    } else if (appType === "blog" || appType === "cms") {
-      // Post class
-      diagram += `  class Post\n`
-      diagram += `  Post : +String id\n`
-      diagram += `  Post : +String userId\n`
-      diagram += `  Post : +String title\n`
-      diagram += `  Post : +String content\n`
-      diagram += `  Post : +String excerpt\n`
-      diagram += `  Post : +String[] tags\n`
-      diagram += `  Post : +String status\n`
-      diagram += `  Post : +Date publishedAt\n`
-      diagram += `  Post : +Date createdAt\n`
-      diagram += `  Post : +Date updatedAt\n\n`
-
-      // Category class
-      diagram += `  class Category\n`
-      diagram += `  Category : +String id\n`
-      diagram += `  Category : +String name\n`
-      diagram += `  Category : +String description\n`
-      diagram += `  Category : +String slug\n`
-      diagram += `  Category : +Date createdAt\n`
-      diagram += `  Category : +Date updatedAt\n\n`
-
-      // Comment class
-      diagram += `  class Comment\n`
-      diagram += `  Comment : +String id\n`
-      diagram += `  Comment : +String postId\n`
-      diagram += `  Comment : +String userId\n`
-      diagram += `  Comment : +String content\n`
-      diagram += `  Comment : +String status\n`
-      diagram += `  Comment : +Date createdAt\n`
-      diagram += `  Comment : +Date updatedAt\n\n`
-
-      // Add relationships
-      diagram += `  User "1" -- "1" Profile : has\n`
-      diagram += `  User "1" -- "many" Post : authors\n`
-      diagram += `  User "1" -- "many" Comment : writes\n`
-      diagram += `  Post "many" -- "many" Category : belongs to\n`
-      diagram += `  Post "1" -- "many" Comment : has\n`
+      toast({
+        title: "Data model generated (fallback)",
+        description: "Data model has been generated using direct OpenAI API call.",
+      })
     } else {
-      // Generic classes for other app types
-      // Content class
-      diagram += `  class Content\n`
-      diagram += `  Content : +String id\n`
-      diagram += `  Content : +String userId\n`
-      diagram += `  Content : +String title\n`
-      diagram += `  Content : +String description\n`
-      diagram += `  Content : +String type\n`
-      diagram += `  Content : +String status\n`
-      diagram += `  Content : +Date createdAt\n`
-      diagram += `  Content : +Date updatedAt\n\n`
+      // If both methods fail, use the default diagram
+      console.log("Both API methods failed, using default diagram")
+      const defaultDiagram = generateDefaultDiagram(specData)
+      setDiagramCode(defaultDiagram)
 
-      // Settings class
-      diagram += `  class Settings\n`
-      diagram += `  Settings : +String id\n`
-      diagram += `  Settings : +String userId\n`
-      diagram += `  Settings : +String key\n`
-      diagram += `  Settings : +String value\n`
-      diagram += `  Settings : +Date createdAt\n`
-      diagram += `  Settings : +Date updatedAt\n\n`
-
-      // Add relationships
-      diagram += `  User "1" -- "1" Profile : has\n`
-      diagram += `  User "1" -- "many" Content : creates\n`
-      diagram += `  User "1" -- "many" Settings : configures\n`
+      toast({
+        title: "Using default diagram",
+        description: "Could not generate custom diagram. Using default template.",
+        variant: "warning",
+      })
     }
+  } catch (error) {
+    console.error("Error generating data model:", error)
+    setPreviewError(error.message)
+    toast({
+      title: "Error",
+      description: error.message || "Failed to generate data model",
+      variant: "destructive",
+    })
+  } finally {
+    setIsGenerating(false)
+  }
+}
 
-    // Just ensure we clean up the final diagram
-    return cleanupDiagramCode(diagram)
+// Function to generate a default diagram based on the specification data
+const generateDefaultDiagram = (specData) => {
+  const appName = specData.app_name || "Application"
+  const appType = specData.app_type || "web"
+
+  let diagram = `classDiagram\n`
+
+  // Add User class for all app types
+  diagram += `  class User\n`
+  diagram += `  User : +String id\n`
+  diagram += `  User : +String name\n`
+  diagram += `  User : +String email\n`
+  diagram += `  User : +String password\n`
+  diagram += `  User : +Date createdAt\n`
+  diagram += `  User : +Date updatedAt\n\n`
+
+  // Add Profile class for all app types
+  diagram += `  class Profile\n`
+  diagram += `  Profile : +String id\n`
+  diagram += `  Profile : +String userId\n`
+  diagram += `  Profile : +String bio\n`
+  diagram += `  Profile : +String avatar\n`
+  diagram += `  Profile : +Date createdAt\n`
+  diagram += `  Profile : +Date updatedAt\n\n`
+
+  // Add app-specific classes based on app type
+  if (appType === "ecommerce") {
+    // Product class
+    diagram += `  class Product\n`
+    diagram += `  Product : +String id\n`
+    diagram += `  Product : +String name\n`
+    diagram += `  Product : +String description\n`
+    diagram += `  Product : +Float price\n`
+    diagram += `  Product : +Int stock\n`
+    diagram += `  Product : +String[] images\n`
+    diagram += `  Product : +String categoryId\n`
+    diagram += `  Product : +Date createdAt\n`
+    diagram += `  Product : +Date updatedAt\n\n`
+
+    // Category class
+    diagram += `  class Category\n`
+    diagram += `  Category : +String id\n`
+    diagram += `  Category : +String name\n`
+    diagram += `  Category : +String description\n`
+    diagram += `  Category : +String slug\n`
+    diagram += `  Category : +Date createdAt\n`
+    diagram += `  Category : +Date updatedAt\n\n`
+
+    // Order class
+    diagram += `  class Order\n`
+    diagram += `  Order : +String id\n`
+    diagram += `  Order : +String userId\n`
+    diagram += `  Order : +Float total\n`
+    diagram += `  Order : +String status\n`
+    diagram += `  Order : +String shippingAddress\n`
+    diagram += `  Order : +String paymentMethod\n`
+    diagram += `  Order : +Date createdAt\n`
+    diagram += `  Order : +Date updatedAt\n\n`
+
+    // OrderItem class
+    diagram += `  class OrderItem\n`
+    diagram += `  OrderItem : +String id\n`
+    diagram += `  OrderItem : +String orderId\n`
+    diagram += `  OrderItem : +String productId\n`
+    diagram += `  OrderItem : +Int quantity\n`
+    diagram += `  OrderItem : +Float price\n`
+    diagram += `  OrderItem : +Date createdAt\n`
+    diagram += `  OrderItem : +Date updatedAt\n\n`
+
+    // Add relationships
+    diagram += `  User "1" -- "1" Profile : has\n`
+    diagram += `  User "1" -- "many" Order : places\n`
+    diagram += `  Order "1" -- "many" OrderItem : contains\n`
+    diagram += `  OrderItem "many" -- "1" Product : references\n`
+    diagram += `  Product "many" -- "1" Category : belongs to\n`
+  } else if (appType === "crm") {
+    // Contact class
+    diagram += `  class Contact\n`
+    diagram += `  Contact : +String id\n`
+    diagram += `  Contact : +String userId\n`
+    diagram += `  Contact : +String name\n`
+    diagram += `  Contact : +String email\n`
+    diagram += `  Contact : +String phone\n`
+    diagram += `  Contact : +String company\n`
+    diagram += `  Contact : +String status\n`
+    diagram += `  Contact : +Date createdAt\n`
+    diagram += `  Contact : +Date updatedAt\n\n`
+
+    // Lead class
+    diagram += `  class Lead\n`
+    diagram += `  Lead : +String id\n`
+    diagram += `  Lead : +String userId\n`
+    diagram += `  Lead : +String contactId\n`
+    diagram += `  Lead : +String name\n`
+    diagram += `  Lead : +String source\n`
+    diagram += `  Lead : +Float value\n`
+    diagram += `  Lead : +String status\n`
+    diagram += `  Lead : +Date createdAt\n`
+    diagram += `  Lead : +Date updatedAt\n\n`
+
+    // Deal class
+    diagram += `  class Deal\n`
+    diagram += `  Deal : +String id\n`
+    diagram += `  Deal : +String userId\n`
+    diagram += `  Deal : +String leadId\n`
+    diagram += `  Deal : +String name\n`
+    diagram += `  Deal : +Float value\n`
+    diagram += `  Deal : +String stage\n`
+    diagram += `  Deal : +Date closingDate\n`
+    diagram += `  Deal : +Date createdAt\n`
+    diagram += `  Deal : +Date updatedAt\n\n`
+
+    // Add relationships
+    diagram += `  User "1" -- "1" Profile : has\n`
+    diagram += `  User "1" -- "many" Contact : manages\n`
+    diagram += `  User "1" -- "many" Lead : manages\n`
+    diagram += `  User "1" -- "many" Deal : manages\n`
+    diagram += `  Contact "1" -- "many" Lead : associated with\n`
+    diagram += `  Lead "1" -- "many" Deal : converts to\n`
+  } else if (appType === "blog" || appType === "cms") {
+    // Post class
+    diagram += `  class Post\n`
+    diagram += `  Post : +String id\n`
+    diagram += `  Post : +String userId\n`
+    diagram += `  Post : +String title\n`
+    diagram += `  Post : +String content\n`
+    diagram += `  Post : +String excerpt\n`
+    diagram += `  Post : +String[] tags\n`
+    diagram += `  Post : +String status\n`
+    diagram += `  Post : +Date publishedAt\n`
+    diagram += `  Post : +Date createdAt\n`
+    diagram += `  Post : +Date updatedAt\n\n`
+
+    // Category class
+    diagram += `  class Category\n`
+    diagram += `  Category : +String id\n`
+    diagram += `  Category : +String name\n`
+    diagram += `  Category : +String description\n`
+    diagram += `  Category : +String slug\n`
+    diagram += `  Category : +Date createdAt\n`
+    diagram += `  Category : +Date updatedAt\n\n`
+
+    // Comment class
+    diagram += `  class Comment\n`
+    diagram += `  Comment : +String id\n`
+    diagram += `  Comment : +String postId\n`
+    diagram += `  Comment : +String userId\n`
+    diagram += `  Comment : +String content\n`
+    diagram += `  Comment : +String status\n`
+    diagram += `  Comment : +Date createdAt\n`
+    diagram += `  Comment : +Date updatedAt\n\n`
+
+    // Add relationships
+    diagram += `  User "1" -- "1" Profile : has\n`
+    diagram += `  User "1" -- "many" Post : authors\n`
+    diagram += `  User "1" -- "many" Comment : writes\n`
+    diagram += `  Post "many" -- "many" Category : belongs to\n`
+    diagram += `  Post "1" -- "many" Comment : has\n`
+  } else {
+    // Generic classes for other app types
+    // Content class
+    diagram += `  class Content\n`
+    diagram += `  Content : +String id\n`
+    diagram += `  Content : +String userId\n`
+    diagram += `  Content : +String title\n`
+    diagram += `  Content : +String description\n`
+    diagram += `  Content : +String type\n`
+    diagram += `  Content : +String status\n`
+    diagram += `  Content : +Date createdAt\n`
+    diagram += `  Content : +Date updatedAt\n\n`
+
+    // Settings class
+    diagram += `  class Settings\n`
+    diagram += `  Settings : +String id\n`
+    diagram += `  Settings : +String userId\n`
+    diagram += `  Settings : +String key\n`
+    diagram += `  Settings : +String value\n`
+    diagram += `  Settings : +Date createdAt\n`
+    diagram += `  Settings : +Date updatedAt\n\n`
+
+    // Add relationships
+    diagram += `  User "1" -- "1" Profile : has\n`
+    diagram += `  User "1" -- "many" Content : creates\n`
+    diagram += `  User "1" -- "many" Settings : configures\n`
   }
 
-  const handleSave = async () => {
-    if (!specificationId) {
-      toast({
-        title: "Error",
-        description: "Please select a specification",
-        variant: "destructive",
-      })
-      return
-    }
+  // Just ensure we clean up the final diagram
+  return cleanupDiagramCode(diagram)
+}
 
-    setIsSubmitting(true)
-    try {
-      // Find the specification to get its name for the project
-      const spec = specifications.find((s) => s.id === specificationId)
-      const projectName = spec ? spec.app_name : "Unknown Project"
-      console.log("Using project name:", projectName, "from specification:", spec)
-
-      // Use the saveDesign server action directly with the specification ID
-      // Explicitly set the type to "data-model" instead of "data"
-      const result = await saveDesign({
-        type: "data-model", // Changed from "data" to "data-model"
-        diagramCode,
-        specificationId, // Pass the specification ID directly
-        projectName, // Pass the project name
-      })
-
-      if (result.success) {
-        toast({
-          title: "Data model saved",
-          description: "Your data model has been saved successfully.",
-        })
-      } else {
-        throw new Error(result.error || "Failed to save data model")
-      }
-    } catch (error) {
-      console.error("Error saving data model:", error)
-      toast({
-        title: "Error",
-        description: error.message || "Failed to save data model.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
+const handleSave = async () => {
+  if (!specificationId) {
+    toast({
+      title: "Error",
+      description: "Please select a specification",
+      variant: "destructive",
+    })
+    return
   }
 
-  return (
+  setIsSubmitting(true)
+  try {
+    // Find the specification to get its name for the project
+    const spec = specifications.find((s) => s.id === specificationId)
+    const projectName = spec ? spec.app_name : "Unknown Project"
+    console.log("Using project name:", projectName, "from specification:", spec)
+
+    // Use the saveDesign server action directly with the specification ID
+    // Explicitly set the type to "data-model" instead of "data"
+    const result = await saveDesign({
+      type: "data-model", // Changed from "data" to "data-model"
+      diagramCode,
+      specificationId, // Pass the specification ID directly
+      projectName, // Pass the project name
+    })
+
+    if (result.success) {
+      toast({
+        title: "Data model saved",
+        description: "Your data model has been saved successfully.",
+      })
+    } else {
+      throw new Error(result.error || "Failed to save data model")
+    }
+  } catch (error) {
+    console.error("Error saving data model:", error)
+    toast({
+      title: "Error",
+      description: error.message || "Failed to save data model.",
+      variant: "destructive",
+    })
+  } finally {
+    setIsSubmitting(false)
+  }
+}
+
+return (
     <div className="space-y-6">
       <Card>
         <CardContent className="p-6">

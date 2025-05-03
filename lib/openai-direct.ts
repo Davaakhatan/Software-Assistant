@@ -1,46 +1,40 @@
 /**
- * Direct OpenAI API client that doesn't rely on internal API routes
- * This avoids URL parsing issues in different environments
+ * Direct OpenAI API client implementation that doesn't rely on our API routes
+ * This serves as a fallback when our API routes have issues
  */
 
-// Result of AI text generation
-export interface AITextResult {
+interface OpenAIOptions {
+  temperature?: number
+  maxTokens?: number
+  apiKey?: string
+}
+
+interface OpenAIResult {
   success: boolean
   text?: string
   error?: string
 }
 
 /**
- * Generate text directly using the OpenAI API without going through our own API route
+ * Makes a direct call to the OpenAI API without going through our API routes
  */
-export async function generateTextWithOpenAI(
+export async function callOpenAIDirectly(
   prompt: string,
   systemPrompt = "",
-  options: {
-    temperature?: number
-    apiKey?: string
-    model?: string
-  } = {},
-): Promise<AITextResult> {
+  options: OpenAIOptions = {},
+): Promise<OpenAIResult> {
   try {
     // Get API key from options or localStorage
     let apiKey = options.apiKey
-
     if (!apiKey && typeof window !== "undefined") {
-      apiKey = localStorage.getItem("openai_api_key")
+      apiKey = localStorage.getItem("openai_api_key") || ""
     }
 
     if (!apiKey || !apiKey.startsWith("sk-")) {
       throw new Error("OpenAI API key is missing or invalid")
     }
 
-    // Prepare the request to OpenAI API
-    const messages = [
-      { role: "system", content: systemPrompt || "You are a helpful assistant." },
-      { role: "user", content: prompt },
-    ]
-
-    // Make direct request to OpenAI API
+    // Call OpenAI API directly
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -48,16 +42,19 @@ export async function generateTextWithOpenAI(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: options.model || "gpt-3.5-turbo-16k",
-        messages,
+        model: "gpt-3.5-turbo-16k",
+        messages: [
+          { role: "system", content: systemPrompt || "You are a helpful assistant." },
+          { role: "user", content: prompt },
+        ],
         temperature: options.temperature || 0.7,
-        max_tokens: 4000,
+        max_tokens: options.maxTokens || 4000,
       }),
     })
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      throw new Error(errorData.error?.message || `OpenAI API error: ${response.status}`)
+      throw new Error(`OpenAI API error: ${response.status} ${errorData.error?.message || "Unknown error"}`)
     }
 
     const data = await response.json()
@@ -71,7 +68,7 @@ export async function generateTextWithOpenAI(
       text: data.choices[0].message.content,
     }
   } catch (error) {
-    console.error("Error generating text with OpenAI:", error)
+    console.error("Error calling OpenAI directly:", error)
     return {
       success: false,
       error: error instanceof Error ? error.message : "An unexpected error occurred",
@@ -80,17 +77,14 @@ export async function generateTextWithOpenAI(
 }
 
 /**
- * Generates a Mermaid diagram for data models using OpenAI
+ * Generates a data model diagram using direct OpenAI API calls
  */
 export async function generateDataModelDiagram(
   appName: string,
   appType: string,
   appDescription: string,
-  databaseSchema = "",
-  options: {
-    temperature?: number
-    apiKey?: string
-  } = {},
+  databaseSchema: string,
+  options: OpenAIOptions = {},
 ): Promise<{ success: boolean; diagram?: string; error?: string }> {
   const prompt = `
 Generate a Mermaid diagram for the data model of the following application:
@@ -99,10 +93,18 @@ App Name: ${appName || "Unknown"}
 App Type: ${appType || "web"}
 Description: ${appDescription || ""}
 
-${databaseSchema ? `# Database Schema\n${databaseSchema}\n\nPlease use the above database schema information to create an accurate data model.` : ""}
+${
+  databaseSchema
+    ? `# Database Schema
+${databaseSchema}
+
+Please use the above database schema information to create an accurate data model.`
+    : ""
+}
 
 Please generate a Mermaid diagram using the 'classDiagram' syntax that shows the data model.
-Include all tables with their fields and relationships.
+If a database schema is provided above, use it as the primary source for creating the diagram.
+Include all tables mentioned in the schema with their fields and relationships.
 Do not use curly braces {} for class definitions.
 Instead, define each property on a separate line with the class name followed by a colon.
 Show relationships between entities with proper cardinality (one-to-one, one-to-many, many-to-many).
@@ -113,16 +115,13 @@ Do not use the tilde (~) character, use dot (.) instead for nested types.
 
   const systemPrompt = "You are a database architect expert in creating Mermaid diagrams for data models."
 
-  const result = await generateTextWithOpenAI(prompt, systemPrompt, {
-    ...options,
-    temperature: 0.7,
-  })
+  const result = await callOpenAIDirectly(prompt, systemPrompt, options)
 
   if (result.success && result.text) {
-    // Clean up the response to extract just the Mermaid diagram
-    let diagramCode = result.text.trim()
+    // Extract the Mermaid diagram from the response
+    let diagramCode = result.text
 
-    // Extract code from markdown code blocks if present
+    // Clean up the response to extract just the Mermaid diagram
     const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(classDiagram[\s\S]*?)```/)
     if (mermaidMatch && mermaidMatch[1]) {
       diagramCode = mermaidMatch[1].trim()
@@ -139,9 +138,12 @@ Do not use the tilde (~) character, use dot (.) instead for nested types.
       }
     }
 
-    // Ensure it starts with classDiagram if not already
-    if (!diagramCode.startsWith("classDiagram")) {
-      diagramCode = "classDiagram\n" + diagramCode
+    // If we still don't have a valid diagram, return an error
+    if (!diagramCode.includes("classDiagram") && !diagramCode.includes("erDiagram")) {
+      return {
+        success: false,
+        error: "Failed to generate a valid diagram",
+      }
     }
 
     return {

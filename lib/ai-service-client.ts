@@ -1,3 +1,5 @@
+import { apiFetch } from "./api-utils"
+
 // Check if an API key is available in localStorage
 export function isApiKeyAvailable(): boolean {
   if (typeof window === "undefined") return false
@@ -24,12 +26,8 @@ export async function generateAIText(
       throw new Error("OpenAI API key is missing or invalid")
     }
 
-    // Use absolute URL path without any URL constructor
-    const apiUrl = "/api/generate-specification"
-
-    console.log("API URL being used:", apiUrl) // For debugging
-
-    const response = await fetch(apiUrl, {
+    // Use our safe API fetch utility instead of direct fetch
+    const response = await apiFetch("/api/generate-specification", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -1,3 +1,5 @@
+import { apiFetch } from "./api-utils"
+
 // Define the supported AI providers
 export type AIProvider = "openai" | "deepseek"
 
@@ -63,9 +65,8 @@ export async function generateAIText(
       throw new Error("OpenAI API key is missing or invalid. Please add your API key in the Settings page.")
     }
 
-    // Use our server-side API endpoint instead of direct OpenAI calls
-    // Use a simple path without URL constructor
-    const response = await fetch("/api/generate-specification", {
+    // Use our safe API fetch utility
+    const response = await apiFetch("/api/generate-specification", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
