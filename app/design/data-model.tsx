@@ -12,7 +12,7 @@ import MermaidDiagram from "@/components/mermaid-diagram"
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
 import { saveDesign } from "./actions"
 import { useAIProvider } from "@/context/ai-provider-context"
-import { generateAIText } from "@/lib/ai-service"
+import { generateDataModelDiagram } from "@/lib/openai-direct"
 
 export default function DataModel() {
   const { toast } = useToast()
@@ -264,70 +264,21 @@ User "1" -- "1" Profile : has`)
 
       const specData = result.data
 
-      // Prepare a prompt for the AI based on the specification
-      const prompt = `
-Generate a Mermaid diagram for the data model of the following application:
-
-App Name: ${specData.app_name || "Unknown"}
-App Type: ${specData.app_type || "web"}
-Description: ${specData.app_description || ""}
-
-${specData.database_schema ? `# Database Schema\n${specData.database_schema}\n\nPlease use the above database schema information to create an accurate data model.` : ""}
-${specData.functional_requirements ? `Functional Requirements: ${specData.functional_requirements}` : ""}
-
-Please generate a Mermaid diagram using the 'classDiagram' syntax that shows the data model.
-If a database schema is provided above, use it as the primary source for creating the diagram.
-Include all tables mentioned in the schema with their fields and relationships.
-Do not use curly braces {} for class definitions.
-Instead, define each property on a separate line with the class name followed by a colon.
-Show relationships between entities with proper cardinality (one-to-one, one-to-many, many-to-many).
-Do not include any explanatory text, only the Mermaid diagram code.
-Do not use comments (lines starting with %%) in the diagram.
-Do not use the tilde (~) character, use dot (.) instead for nested types.
-`
-
-      console.log("Generating diagram with AI")
-
-      // Use the AI service to generate the diagram
-      const aiResult = await generateAIText(
-        prompt,
-        "You are a database architect expert in creating Mermaid diagrams for data models.",
+      // Use the direct OpenAI implementation
+      const aiResult = await generateDataModelDiagram(
+        specData.app_name || "Unknown",
+        specData.app_type || "web",
+        specData.app_description || "",
+        specData.database_schema || "",
         {
-          provider,
           temperature,
-          apiKey: apiKey, // Pass the API key
+          apiKey,
         },
       )
 
-      if (aiResult.success && aiResult.text) {
-        // Extract the Mermaid diagram from the response
-        let diagramCode = aiResult.text
-
-        // Clean up the response to extract just the Mermaid diagram
-        const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(classDiagram[\s\S]*?)```/)
-        if (mermaidMatch && mermaidMatch[1]) {
-          diagramCode = mermaidMatch[1].trim()
-        } else {
-          // If no mermaid code block found, look for classDiagram or erDiagram
-          const classMatch = diagramCode.match(/(classDiagram[\s\S]*?)(?=\n\s*\n|$)/)
-          if (classMatch && classMatch[1]) {
-            diagramCode = classMatch[1].trim()
-          } else {
-            const erMatch = diagramCode.match(/(erDiagram[\s\S]*?)(?=\n\s*\n|$)/)
-            if (erMatch && erMatch[1]) {
-              diagramCode = erMatch[1].trim()
-            }
-          }
-        }
-
-        // If we still don't have a valid diagram, generate a default one
-        if (!diagramCode.includes("classDiagram") && !diagramCode.includes("erDiagram")) {
-          console.log("AI didn't generate a valid diagram, using fallback")
-          diagramCode = generateDefaultDiagram(specData)
-        }
-
+      if (aiResult.success && aiResult.diagram) {
         // Convert to simple syntax
-        const simplifiedDiagram = convertToSimpleSyntax(diagramCode)
+        const simplifiedDiagram = convertToSimpleSyntax(aiResult.diagram)
         setDiagramCode(simplifiedDiagram)
 
         toast({
