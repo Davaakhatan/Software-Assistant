@@ -1,49 +1,19 @@
 // lib/api-utils.ts
 
+import { createApiUrl } from "./url-utils";
+
 /**
- * Utility functions for handling API URLs across different environments
+ * A drop-in replacement for fetch() that always turns "/api/…"
+ * into "https://<your-domain>/api/…", preventing accidental HTML pages.
  */
-
-// Get the base URL for API requests based on the current environment
-export function getBaseUrl(): string {
-  // 1) In the browser, trust the current origin
-  if (typeof window !== "undefined") {
-    return window.location.origin
-  }
-
-  // 2) On Vercel (or similar), use the injected VERCEL_URL
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`
-  }
-
-  // 3) Explicit override (works in any Node env, including self-hosted)
-  if (process.env.NEXT_PUBLIC_SITE_URL) {
-    return process.env.NEXT_PUBLIC_SITE_URL
-  }
-
-  // 4) Fallback for local development
-  return "http://localhost:3000"
-}
-
-// Create a full API URL
-export function createApiUrl(path: string): string {
-  const normalized = path.startsWith("/") ? path : `/${path}`
-  const base = getBaseUrl()
-  const full = `${base}${normalized}`
-  console.debug("[api-utils] createApiUrl:", full)
-  return full
-}
-
-// A wrapper around fetch that always uses the absolute URL
 export async function apiFetch(
   path: string,
-  options: RequestInit = {},
+  options: RequestInit = {}
 ): Promise<Response> {
-  const url = createApiUrl(path)
-  try {
-    return await fetch(url, options)
-  } catch (err) {
-    console.error("[api-utils] fetch failed, URL was:", url, err)
-    throw err
-  }
+  const url =
+    path.startsWith("http://") || path.startsWith("https://")
+      ? path
+      : createApiUrl(path);
+
+  return fetch(url, options);
 }
