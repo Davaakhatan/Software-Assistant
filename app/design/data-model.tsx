@@ -17,24 +17,24 @@ import { generateDataModelDiagram } from "@/lib/openai-direct"
 export default function DataModel() {
   const { toast } = useToast()
   const { provider, temperature } = useAIProvider()
-  const [diagramCode, setDiagramCode] = useState(`classDiagram
-class User
-User : +String id
-User : +String name
-User : +String email
-User : +String password
-User : +Date createdAt
-User : +Date updatedAt
+const [diagramCode, setDiagramCode] = useState(`classDiagram
+class Users {
+  id       : int    (PK)
+  name     : string
+  email    : string
+  password : string
+}
+class DetectedObjects {
+  id          : int      (PK)
+  user_id     : int      (FK)
+  name        : string
+  description : string
+  image_url   : string
+  timestamp   : datetime
+}
 
-class Profile
-Profile : +String id
-Profile : +String userId
-Profile : +String bio
-Profile : +String avatar
-Profile : +Date createdAt
-Profile : +Date updatedAt
-
-User "1" -- "1" Profile : has`)
+Users "1" -- "0..*" DetectedObjects
+`)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [specificationId, setSpecificationId] = useState("")

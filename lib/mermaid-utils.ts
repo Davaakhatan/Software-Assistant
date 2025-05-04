@@ -203,20 +203,45 @@ export function validateMermaidSyntaxArchitecture(code: string): string {
  * @param code The Mermaid diagram code to validate
  * @returns The validated code or an empty string if invalid
  */
-export function validateMermaidSyntaxComponent(code: string): string {
-  // Basic check to prevent empty code
-  if (!code || code.trim() === "") {
-    return "" // Return empty string if code is empty
+export function validateMermaidSyntaxComponent(raw: string): string {
+  // 1) Normalize line breaks and trim
+  let code = raw.replace(/\r\n/g, "\n").trim();
+
+  // 2) Ensure header
+  if (!code.startsWith("classDiagram")) {
+    code = `classDiagram\n\n${code}`;
   }
 
-  // Check if the code starts with 'classDiagram'
-  if (!code.trim().startsWith("classDiagram")) {
-    // Try to fix it by adding 'classDiagram' at the beginning
-    code = "classDiagram\n" + code
-  }
+  // 3) Inject a blank line after the header if missing
+  code = code.replace(/^classDiagram\n(?!\n)/, "classDiagram\n\n");
 
-  // Add more sophisticated validation here if needed
-  return code // Return the original or fixed code
+  // 4) Wrap any flat class + its properties into a brace block
+  //    e.g. 
+  //      class Users
+  //      Users : id: int
+  //      Users : name: string
+  //    becomes
+  //      class Users {
+  //        id: int
+  //        name: string
+  //      }
+  code = code.replace(
+    /class\s+(\w+)\s*\n((?:\1\s*:\s*[^\n]+\n?)+)/g,
+    (_match, className, propsBlock) => {
+      // Extract just the property lines, remove the leading "ClassName : "
+      const bodyLines = propsBlock
+        .trim()
+        .split("\n")
+        .map((line) =>
+          line.replace(new RegExp(`^${className}\\s*:\\s*`), "  ")
+        )
+        .join("\n");
+
+      return `class ${className} {\n${bodyLines}\n}\n`;
+    }
+  );
+
+  return code;
 }
 
 /**
