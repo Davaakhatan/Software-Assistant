@@ -1,12 +1,12 @@
 /**
- * Direct OpenAI API client implementation that doesn't rely on our API routes
- * This serves as a fallback when our API routes have issues
+ * Direct OpenAI API client that bypasses our API routes
+ * This is used as a fallback when our API routes fail
  */
 
 interface OpenAIOptions {
   temperature?: number
   maxTokens?: number
-  apiKey?: string
+  apiKey: string
 }
 
 interface OpenAIResult {
@@ -16,59 +16,60 @@ interface OpenAIResult {
 }
 
 /**
- * Makes a direct call to the OpenAI API without going through our API routes
+ * Makes a direct call to the OpenAI API
  */
 export async function callOpenAIDirectly(
   prompt: string,
-  systemPrompt = "",
-  options: OpenAIOptions = {},
+  systemPrompt: string,
+  options: OpenAIOptions,
 ): Promise<OpenAIResult> {
   try {
-    // Get API key from options or localStorage
-    let apiKey = options.apiKey
-    if (!apiKey && typeof window !== "undefined") {
-      apiKey = localStorage.getItem("openai_api_key") || ""
-    }
-
-    if (!apiKey || !apiKey.startsWith("sk-")) {
+    if (!options.apiKey || !options.apiKey.startsWith("sk-")) {
       throw new Error("OpenAI API key is missing or invalid")
     }
 
-    // Call OpenAI API directly
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Prepare the messages array
+    const messages = [
+      { role: "system", content: systemPrompt || "You are a helpful assistant." },
+      { role: "user", content: prompt },
+    ]
+
+    // Call OpenAI API directly using fetch with a hardcoded URL
+    const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${options.apiKey}`,
       },
       body: JSON.stringify({
         model: "gpt-3.5-turbo-16k",
-        messages: [
-          { role: "system", content: systemPrompt || "You are a helpful assistant." },
-          { role: "user", content: prompt },
-        ],
+        messages,
         temperature: options.temperature || 0.7,
         max_tokens: options.maxTokens || 4000,
       }),
     })
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      throw new Error(`OpenAI API error: ${response.status} ${errorData.error?.message || "Unknown error"}`)
+    // Handle API errors
+    if (!openaiResponse.ok) {
+      const errorData = await openaiResponse.json().catch(() => ({}))
+      throw new Error(`OpenAI API error: ${openaiResponse.status} ${errorData.error?.message || "Unknown error"}`)
     }
 
-    const data = await response.json()
+    // Parse the successful response
+    const data = await openaiResponse.json()
 
+    // Validate response structure
     if (!data?.choices?.[0]?.message?.content) {
       throw new Error("Invalid response from OpenAI")
     }
 
+    // Return the generated text
     return {
       success: true,
       text: data.choices[0].message.content,
     }
   } catch (error) {
-    console.error("Error calling OpenAI directly:", error)
+    console.error("Error in direct OpenAI call:", error)
     return {
       success: false,
       error: error instanceof Error ? error.message : "An unexpected error occurred",
@@ -77,14 +78,17 @@ export async function callOpenAIDirectly(
 }
 
 /**
- * Generates a data model diagram using direct OpenAI API calls
+ * Generates a data model diagram using OpenAI
  */
 export async function generateDataModelDiagram(
   appName: string,
   appType: string,
   appDescription: string,
   databaseSchema: string,
-  options: OpenAIOptions = {},
+  options: {
+    temperature?: number
+    apiKey: string
+  },
 ): Promise<{ success: boolean; diagram?: string; error?: string }> {
   const prompt = `
 Generate a Mermaid diagram for the data model of the following application:
@@ -115,34 +119,39 @@ Do not use the tilde (~) character, use dot (.) instead for nested types.
 
   const systemPrompt = "You are a database architect expert in creating Mermaid diagrams for data models."
 
-  const result = await callOpenAIDirectly(prompt, systemPrompt, options)
+  const result = await callOpenAIDirectly(prompt, systemPrompt, {
+    temperature: options.temperature || 0.7,
+    apiKey: options.apiKey,
+  })
 
   if (result.success && result.text) {
-    // Extract the Mermaid diagram from the response
-    let diagramCode = result.text
+    // Clean up the AI response to extract just the Mermaid code
+    let diagramCode = result.text.trim()
 
-    // Clean up the response to extract just the Mermaid diagram
-    const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(classDiagram[\s\S]*?)```/)
+    // Remove any markdown code block markers if present
+    diagramCode = diagramCode
+      .replace(/```mermaid/g, "")
+      .replace(/```/g, "")
+      .trim()
+
+    // Ensure it starts with classDiagram if not already
+    if (!diagramCode.startsWith("classDiagram")) {
+      diagramCode = "classDiagram\n" + diagramCode
+    }
+
+    const mermaidMatch = diagramCode.match(/```(?:mermaid)?\s*(classDiagram[\s\S]*?)```/m)
     if (mermaidMatch && mermaidMatch[1]) {
       diagramCode = mermaidMatch[1].trim()
     } else {
       // If no mermaid code block found, look for classDiagram or erDiagram
-      const classMatch = diagramCode.match(/(classDiagram[\s\S]*?)(?=\n\s*\n|$)/)
+      const classMatch = diagramCode.match(/(classDiagram[\s\S]*)/i)
       if (classMatch && classMatch[1]) {
         diagramCode = classMatch[1].trim()
       } else {
-        const erMatch = diagramCode.match(/(erDiagram[\s\S]*?)(?=\n\s*\n|$)/)
+        const erMatch = diagramCode.match(/(erDiagram[\s\S]*)/i)
         if (erMatch && erMatch[1]) {
           diagramCode = erMatch[1].trim()
         }
-      }
-    }
-
-    // If we still don't have a valid diagram, return an error
-    if (!diagramCode.includes("classDiagram") && !diagramCode.includes("erDiagram")) {
-      return {
-        success: false,
-        error: "Failed to generate a valid diagram",
       }
     }
 

@@ -1,84 +1,42 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { apiFetch } from "./api-utils"
+import { createApiUrl } from "./url-utils"
 
-export async function POST(request: NextRequest) {
+export async function generateAIText(
+  prompt: string,
+  systemPrompt = "",
+  options: { temperature?: number; apiKey?: string } = {},
+): Promise<{ success: boolean; text?: string; error?: string }> {
   try {
-    const { prompt, systemPrompt, temperature, apiKey } = await request.json()
+    // …resolve your API key here…
 
-    // Use the API key from the request or fall back to environment variable
-    const effectiveApiKey = apiKey || process.env.OPENAI_API_KEY
+    // Build an absolute URL to your Next.js API route:
+    const url = createApiUrl("/api/generate-specification")
 
-    if (!effectiveApiKey || !effectiveApiKey.startsWith("sk-")) {
-      return NextResponse.json({ success: false, error: "OpenAI API key is missing or invalid" }, { status: 400 })
-    }
-
-    // Validate prompt
-    if (!prompt) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Prompt is required",
-        },
-        { status: 400 },
-      )
-    }
-
-    // Prepare the messages array
-    const messages = [
-      { role: "system", content: systemPrompt || "You are a helpful assistant." },
-      { role: "user", content: prompt },
-    ]
-
-    // Call OpenAI API directly using fetch with a hardcoded URL
-    const openaiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Now fetch that—no chance of routing to your page:
+    const response = await apiFetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${effectiveApiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-3.5-turbo-16k",
-        messages,
-        temperature: temperature || 0.7,
-        max_tokens: 4000,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, systemPrompt, temperature: options.temperature, apiKey: options.apiKey }),
     })
 
-    // Handle API errors
-    if (!openaiResponse.ok) {
-      const errorData = await openaiResponse.json().catch(() => ({}))
-      return NextResponse.json(
-        {
-          success: false,
-          error: `OpenAI API error: ${openaiResponse.status} ${errorData.error?.message || "Unknown error"}`,
-        },
-        { status: openaiResponse.status },
+    // Always read as text first so we can catch HTML bodies:
+    const textBody = await response.text()
+    let data: any
+    try {
+      data = JSON.parse(textBody)
+    } catch {
+      throw new Error(
+        `Expected JSON but got:\n${textBody.slice(0,200)}…`
       )
     }
 
-    // Parse the successful response
-    const data = await openaiResponse.json()
-
-    // Validate response structure
-    if (!data?.choices?.[0]?.message?.content) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Invalid response from OpenAI",
-        },
-        { status: 500 },
-      )
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || `HTTP ${response.status}`)
     }
 
-    // Return the generated text
-    return NextResponse.json({
-      success: true,
-      text: data.choices[0].message.content,
-    })
-  } catch (error) {
-    console.error("Error in generate-specification route:", error)
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : "An unexpected error occurred" },
-      { status: 500 },
-    )
+    return { success: true, text: data.text }
+  } catch (err: any) {
+    console.error("Error generating AI text:", err)
+    return { success: false, error: err.message }
   }
 }
