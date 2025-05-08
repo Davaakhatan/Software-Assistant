@@ -1,6 +1,6 @@
 "use client"
 
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
+import { Card, CardContent, CardFooter, CardHeader, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { AlertCircle, Box, FileCode, Github, Gitlab } from "lucide-react"
@@ -50,16 +50,19 @@ export default function SavedPipelinesClient({ pipelines, needsSetup }) {
   return (
     <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
       {pipelines.map((pipeline) => (
-        <Card key={pipeline.id} className="overflow-hidden">
-          <CardHeader className="pb-3">
+        <Card
+          key={pipeline.id}
+          className="border-slate-800 bg-slate-900 text-slate-100 hover:bg-slate-800 transition-colors"
+        >
+          <CardHeader className="pb-2">
             <div className="flex items-center gap-3">
               {getPlatformIcon(pipeline.pipeline_type || pipeline.platform)}
               <div>
                 <h3 className="font-medium">{pipeline.name || pipeline.project_name}</h3>
-                <p className="text-sm text-muted-foreground">
+                <CardDescription className="text-slate-400">
                   {(pipeline.pipeline_type || pipeline.platform || "CI/CD").charAt(0).toUpperCase() +
                     (pipeline.pipeline_type || pipeline.platform || "CI/CD").slice(1)}
-                </p>
+                </CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -69,7 +72,7 @@ export default function SavedPipelinesClient({ pipelines, needsSetup }) {
             </p>
           </CardContent>
           <CardFooter className="flex justify-between">
-            <Button variant="outline" asChild>
+            <Button variant="secondary" className="gap-2 bg-slate-800 hover:bg-slate-700" asChild>
               <Link href={`/cicd/${pipeline.id}`}>View Details</Link>
             </Button>
             <DeleteButton id={pipeline.id} />

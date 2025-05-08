@@ -97,35 +97,35 @@ export default function PipelineDetailClient({ pipeline }) {
       </div>
 
       <Tabs defaultValue="code" className="space-y-6">
-        <TabsList className="w-full max-w-md">
-          <TabsTrigger value="code" className="gap-2">
+        <TabsList className="w-full max-w-md bg-slate-800">
+          <TabsTrigger value="code" className="gap-2 data-[state=active]:bg-slate-700">
             <Code className="h-4 w-4" />
             Pipeline Code
           </TabsTrigger>
-          <TabsTrigger value="details" className="gap-2">
+          <TabsTrigger value="details" className="gap-2 data-[state=active]:bg-slate-700">
             <FileCode className="h-4 w-4" />
             Details
           </TabsTrigger>
-          <TabsTrigger value="history" className="gap-2">
+          <TabsTrigger value="history" className="gap-2 data-[state=active]:bg-slate-700">
             <History className="h-4 w-4" />
             History
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="code">
-          <Card>
-            <CardHeader>
+          <Card className="border-slate-800 bg-slate-900 text-slate-100">
+            <CardHeader className="border-b border-slate-800">
               <CardTitle>Pipeline Configuration</CardTitle>
-              <CardDescription>The complete pipeline code</CardDescription>
+              <CardDescription className="text-slate-400">The complete pipeline code</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="relative">
-                <pre className="bg-slate-50 p-4 rounded-md overflow-auto max-h-[500px] text-sm font-mono border">
+                <pre className="bg-slate-950 p-4 rounded-md overflow-auto max-h-[500px] text-sm font-mono border border-slate-700 text-slate-100">
                   <code>{pipeline.pipeline_code || pipeline.generated_config || "No pipeline code available"}</code>
                 </pre>
                 <div className="absolute top-2 right-2">
                   <Button
-                    variant="ghost"
+                    variant="secondary"
                     size="sm"
                     className="h-7 px-2 text-xs"
                     onClick={handleCopyCode}
@@ -141,10 +141,10 @@ export default function PipelineDetailClient({ pipeline }) {
 
         <TabsContent value="details">
           <div className="grid gap-6 md:grid-cols-2">
-            <Card>
-              <CardHeader>
+            <Card className="border-slate-800 bg-slate-900 text-slate-100">
+              <CardHeader className="border-b border-slate-800">
                 <CardTitle>Pipeline Details</CardTitle>
-                <CardDescription>Configuration and metadata</CardDescription>
+                <CardDescription className="text-slate-400">Configuration and metadata</CardDescription>
               </CardHeader>
               <CardContent>
                 <dl className="grid grid-cols-[1fr_2fr] gap-3 text-sm">
@@ -194,31 +194,31 @@ export default function PipelineDetailClient({ pipeline }) {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
+            <Card className="border-slate-800 bg-slate-900 text-slate-100">
+              <CardHeader className="border-b border-slate-800">
                 <CardTitle>Integration Guide</CardTitle>
-                <CardDescription>How to use this pipeline</CardDescription>
+                <CardDescription className="text-slate-400">How to use this pipeline</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <p className="text-sm">Follow these steps to integrate this CI/CD pipeline into your project:</p>
+                <p className="text-slate-300">Follow these steps to integrate this CI/CD pipeline into your project:</p>
 
                 <div className="space-y-4">
-                  <div className="bg-slate-50 p-3 rounded-md border">
+                  <div className="bg-slate-800 p-3 rounded-md border border-slate-700">
                     <h3 className="text-sm font-medium flex items-center gap-2 mb-2">
                       <Terminal className="h-4 w-4" />
                       Step 1: Download the pipeline file
                     </h3>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-slate-400">
                       Use the download button at the top of this page to get the pipeline configuration file.
                     </p>
                   </div>
 
-                  <div className="bg-slate-50 p-3 rounded-md border">
+                  <div className="bg-slate-800 p-3 rounded-md border border-slate-700">
                     <h3 className="text-sm font-medium flex items-center gap-2 mb-2">
                       <Terminal className="h-4 w-4" />
                       Step 2: Add to your repository
                     </h3>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-slate-400">
                       {(pipeline.pipeline_type || pipeline.platform || "").toLowerCase().includes("github")
                         ? "Place the file in the .github/workflows directory in your repository."
                         : (pipeline.pipeline_type || pipeline.platform || "").toLowerCase().includes("gitlab")
@@ -229,22 +229,22 @@ export default function PipelineDetailClient({ pipeline }) {
                     </p>
                   </div>
 
-                  <div className="bg-slate-50 p-3 rounded-md border">
+                  <div className="bg-slate-800 p-3 rounded-md border border-slate-700">
                     <h3 className="text-sm font-medium flex items-center gap-2 mb-2">
                       <Terminal className="h-4 w-4" />
                       Step 3: Configure secrets
                     </h3>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-slate-400">
                       Add any required secrets or environment variables to your CI/CD platform.
                     </p>
                   </div>
 
-                  <div className="bg-slate-50 p-3 rounded-md border">
+                  <div className="bg-slate-800 p-3 rounded-md border border-slate-700">
                     <h3 className="text-sm font-medium flex items-center gap-2 mb-2">
                       <Terminal className="h-4 w-4" />
                       Step 4: Commit and push
                     </h3>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-slate-400">
                       Commit the changes and push to your repository to trigger the pipeline.
                     </p>
                   </div>
@@ -255,16 +255,16 @@ export default function PipelineDetailClient({ pipeline }) {
         </TabsContent>
 
         <TabsContent value="history">
-          <Card>
-            <CardHeader>
+          <Card className="border-slate-800 bg-slate-900 text-slate-100">
+            <CardHeader className="border-b border-slate-800">
               <CardTitle>Pipeline History</CardTitle>
-              <CardDescription>Recent pipeline runs and changes</CardDescription>
+              <CardDescription className="text-slate-400">Recent pipeline runs and changes</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-center p-6 text-center">
                 <div>
                   <History className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground mb-4">Pipeline history is not available in this preview</p>
+                  <p className="text-slate-400 mb-4">Pipeline history is not available in this preview</p>
                   <p className="text-xs text-muted-foreground">
                     In a production environment, this would show the history of pipeline runs and changes.
                   </p>
