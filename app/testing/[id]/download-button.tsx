@@ -1,32 +1,34 @@
 "use client"
 
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Download } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 export default function DownloadButton({ test }) {
   const { toast } = useToast()
+  const [isDownloading, setIsDownloading] = useState(false)
 
   const handleDownload = () => {
     try {
+      setIsDownloading(true)
+
       // Parse the generated_tests JSON if it's a string
       let testData
-      let generatedCode = ""
-
       if (typeof test.generated_tests === "string") {
         try {
           testData = JSON.parse(test.generated_tests)
-          generatedCode = testData.generatedCode || test.generated_tests
         } catch (e) {
-          generatedCode = test.generated_tests
+          testData = { generatedCode: test.generated_tests }
         }
       } else {
         testData = test.generated_tests
-        generatedCode = testData.generatedCode || ""
       }
 
+      const codeToDownload = testData.generatedCode || testData
+
       // Create a blob and download it
-      const blob = new Blob([generatedCode], { type: "text/plain" })
+      const blob = new Blob([codeToDownload], { type: "text/plain" })
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
@@ -47,13 +49,15 @@ export default function DownloadButton({ test }) {
         description: "Failed to download test",
         variant: "destructive",
       })
+    } finally {
+      setIsDownloading(false)
     }
   }
 
   return (
-    <Button variant="outline" onClick={handleDownload} className="flex items-center gap-2">
+    <Button onClick={handleDownload} disabled={isDownloading} className="flex items-center gap-2">
       <Download className="h-4 w-4" />
-      Download Test Code
+      {isDownloading ? "Downloading..." : "Download Test"}
     </Button>
   )
 }

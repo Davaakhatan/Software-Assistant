@@ -1,97 +1,81 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Download, Eye, Trash2 } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
 import { getTestCases } from "./actions"
-import { format } from "date-fns"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+import { useToast } from "@/hooks/use-toast"
+import { Eye, RefreshCw, AlertTriangle } from "lucide-react"
 import Link from "next/link"
+import { Badge } from "@/components/ui/badge"
+import { format } from "date-fns"
+import DeleteTestButton from "./delete-test-button"
 
 export default function SavedTests() {
   const { toast } = useToast()
-  const [tests, setTests] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [testCases, setTestCases] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [error, setError] = useState(null)
+  const [debugInfo, setDebugInfo] = useState(null)
 
   useEffect(() => {
-    const fetchTests = async () => {
-      try {
-        setLoading(true)
-        const result = await getTestCases()
-        if (result.success) {
-          setTests(result.data || [])
-        } else {
-          toast({
-            title: "Error",
-            description: result.error || "Failed to load saved tests",
-            variant: "destructive",
-          })
-        }
-      } catch (error) {
-        console.error("Error fetching tests:", error)
+    fetchTestCases()
+  }, [])
+
+  const fetchTestCases = async () => {
+    setIsLoading(true)
+    setError(null)
+    setDebugInfo(null)
+
+    try {
+      console.log("Fetching test cases...")
+      const result = await getTestCases()
+      console.log("Fetch result:", result)
+
+      if (result.success) {
+        console.log(`Fetched ${result.data?.length || 0} test cases`)
+        setTestCases(result.data || [])
+        setDebugInfo({
+          count: result.data?.length || 0,
+          timestamp: new Date().toISOString(),
+        })
+      } else {
+        console.error("Failed to load test cases:", result.error)
+        setError(result.error || "Failed to load test cases")
         toast({
-          title: "Error",
-          description: "Failed to load saved tests",
+          title: "Error loading test cases",
+          description: result.error || "Failed to load test cases",
           variant: "destructive",
         })
-      } finally {
-        setLoading(false)
       }
-    }
-
-    fetchTests()
-  }, [toast])
-
-  const handleDownload = (test) => {
-    try {
-      // Parse the generated_tests JSON if it's a string
-      let testData
-      if (typeof test.generated_tests === "string") {
-        try {
-          testData = JSON.parse(test.generated_tests)
-        } catch (e) {
-          testData = { generatedCode: test.generated_tests }
-        }
-      } else {
-        testData = test.generated_tests
-      }
-
-      const codeToDownload = testData.generatedCode || testData
-
-      // Create a blob and download it
-      const blob = new Blob([codeToDownload], { type: "text/plain" })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `${test.name || "test"}.${test.framework === "jest" ? "test.js" : test.framework === "vitest" ? "spec.js" : "js"}`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-
-      toast({
-        title: "Test downloaded",
-        description: "Your test has been downloaded successfully.",
-      })
     } catch (error) {
-      console.error("Error downloading test:", error)
+      console.error("Error fetching test cases:", error)
+      setError(error.message || "An unexpected error occurred")
       toast({
         title: "Error",
-        description: "Failed to download test",
+        description: "Failed to fetch test cases. Please try again.",
         variant: "destructive",
       })
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  const handleDelete = async (id) => {
-    // This would be implemented with a deleteTestCase server action
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    await fetchTestCases()
+    setIsRefreshing(false)
+
     toast({
-      title: "Not implemented",
-      description: "Delete functionality will be implemented in a future update.",
+      title: "Data refreshed",
+      description: "The test cases list has been refreshed.",
     })
+  }
+
+  const handleDeleteSuccess = () => {
+    // Refresh the list after successful deletion
+    fetchTestCases()
   }
 
   const getTestTypeColor = (type) => {
@@ -122,102 +106,134 @@ export default function SavedTests() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {[1, 2, 3].map((i) => (
-          <Card key={i}>
-            <CardHeader>
-              <Skeleton className="h-6 w-48" />
-              <Skeleton className="h-4 w-72" />
-            </CardHeader>
-            <CardContent>
-              <div className="flex gap-2 mb-4">
-                <Skeleton className="h-6 w-20" />
-                <Skeleton className="h-6 w-20" />
-              </div>
-              <Skeleton className="h-4 w-full" />
-            </CardContent>
-            <CardFooter>
-              <div className="flex gap-2">
-                <Skeleton className="h-10 w-24" />
-                <Skeleton className="h-10 w-24" />
-              </div>
-            </CardFooter>
-          </Card>
-        ))}
-      </div>
-    )
-  }
-
-  if (tests.length === 0) {
-    return (
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center p-12">
-          <p className="text-muted-foreground mb-4">No saved tests found.</p>
-          <p className="text-sm text-muted-foreground">
-            Generate and save tests from the Test Generator tab to see them here.
-          </p>
-        </CardContent>
-      </Card>
-    )
-  }
-
   return (
-    <div className="space-y-4">
-      {tests.map((test) => (
-        <Card key={test.id}>
-          <CardHeader>
-            <CardTitle>{test.name || "Unnamed Test"}</CardTitle>
-            <CardDescription>
-              {test.created_at
-                ? `Created on ${format(new Date(test.created_at), "MMM d, yyyy 'at' h:mm a")}`
-                : "Creation date unknown"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-2 mb-4">
-              <Badge className={getTestTypeColor(test.test_type)}>
-                {test.test_type?.charAt(0).toUpperCase() + test.test_type?.slice(1) || "Unknown"} Tests
-              </Badge>
-              <Badge className={getFrameworkColor(test.framework)}>
-                {test.framework?.charAt(0).toUpperCase() + test.framework?.slice(1) || "Unknown"}
-              </Badge>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">Saved Test Cases</h2>
+        <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing} className="gap-2">
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+          {isRefreshing ? "Refreshing..." : "Refresh"}
+        </Button>
+      </div>
+
+      {debugInfo && (
+        <div className="text-xs text-muted-foreground">
+          Last updated: {debugInfo.timestamp} | Found: {debugInfo.count} test cases
+        </div>
+      )}
+
+      {error && (
+        <Card className="bg-red-50 border-red-200">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5" />
+              <div>
+                <h3 className="font-medium text-red-800">Error loading test cases</h3>
+                <p className="text-sm text-red-700">{error}</p>
+                <Button variant="outline" size="sm" className="mt-2 bg-white hover:bg-red-50" onClick={handleRefresh}>
+                  Try Again
+                </Button>
+              </div>
             </div>
-            <p className="text-sm text-muted-foreground">
-              Component:{" "}
-              <span className="font-mono">{test.component_to_test || test.component || "Not specified"}</span>
-            </p>
           </CardContent>
-          <CardFooter className="flex justify-between">
+        </Card>
+      )}
+
+      {isLoading ? (
+        <div className="flex items-center justify-center p-12">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p>Loading test cases...</p>
+          </div>
+        </div>
+      ) : testCases.length === 0 && !error ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center p-12">
+            <p className="text-muted-foreground mb-4">No test cases found</p>
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleDownload(test)}
-                className="flex items-center gap-1"
-              >
-                <Download className="h-4 w-4" />
-                Download
+              <Button asChild>
+                <Link href="/testing">Create New Tests</Link>
               </Button>
-              <Button variant="outline" size="sm" asChild className="flex items-center gap-1">
-                <Link href={`/testing/${test.id}`}>
-                  <Eye className="h-4 w-4" />
-                  View
-                </Link>
+              <Button variant="outline" onClick={handleRefresh}>
+                Refresh Data
               </Button>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => handleDelete(test.id)}
-              className="text-red-500 hover:text-red-700 hover:bg-red-50"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </CardFooter>
+          </CardContent>
         </Card>
-      ))}
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {testCases.map((testCase) => (
+            <Card key={testCase.id} className="overflow-hidden">
+              <CardHeader className="pb-3">
+                <div className="flex justify-between items-start">
+                  <CardTitle className="text-lg">{testCase.name || "Unnamed Test"}</CardTitle>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="icon" asChild>
+                      <Link href={`/testing/${testCase.id}`}>
+                        <Eye className="h-4 w-4" />
+                      </Link>
+                    </Button>
+                    <DeleteTestButton testId={testCase.id} onSuccess={handleDeleteSuccess} />
+                  </div>
+                </div>
+                <CardDescription>
+                  {testCase.created_at
+                    ? `Created on ${format(new Date(testCase.created_at), "MMM d, yyyy")}`
+                    : "Creation date unknown"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge className={getTestTypeColor(testCase.test_type)}>
+                      {testCase.test_type?.charAt(0).toUpperCase() + testCase.test_type?.slice(1) || "Unknown"} Tests
+                    </Badge>
+                    <Badge className={getFrameworkColor(testCase.framework)}>
+                      {testCase.framework?.charAt(0).toUpperCase() + testCase.framework?.slice(1) || "Unknown"}
+                    </Badge>
+                  </div>
+
+                  <div className="text-sm">
+                    <span className="font-medium">Component: </span>
+                    <span className="font-mono">{testCase.component_to_test || "Not specified"}</span>
+                  </div>
+
+                  {testCase.specifications && (
+                    <div className="text-sm">
+                      <span className="font-medium">Specification: </span>
+                      <span>{testCase.specifications.app_name || "Unknown"}</span>
+                    </div>
+                  )}
+
+                  {testCase.designs && (
+                    <div className="text-sm">
+                      <span className="font-medium">Design: </span>
+                      <span>
+                        {testCase.designs.type?.charAt(0).toUpperCase() + testCase.designs.type?.slice(1) || "Unknown"}
+                      </span>
+                    </div>
+                  )}
+
+                  {testCase.code_generations && (
+                    <div className="text-sm">
+                      <span className="font-medium">Generated Code: </span>
+                      <span>
+                        {testCase.code_generations.language} - {testCase.code_generations.framework}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="mt-4">
+                    <Button asChild variant="outline" size="sm" className="w-full">
+                      <Link href={`/testing/${testCase.id}`}>View Details</Link>
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

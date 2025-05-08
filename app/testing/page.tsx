@@ -12,6 +12,9 @@ export const metadata: Metadata = {
   description: "Generate and manage test cases for your application",
 }
 
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
 export default function TestingPage() {
   return (
     <div className="container mx-auto py-10">

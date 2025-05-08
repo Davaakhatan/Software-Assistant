@@ -406,39 +406,25 @@ export async function getGeneratedCode() {
   }
 }
 
-export async function getGeneratedCodeById(id: string) {
+export async function getGeneratedCodeById(id) {
   try {
-    const supabase = getSupabaseServer()
+    console.log(`Getting generated code with ID: ${id}`)
 
-    // Validate UUID format
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-    if (!uuidRegex.test(id)) {
-      return {
-        success: false,
-        error: "Invalid generated code ID format",
-      }
-    }
+    // Import the supabase admin client
+    const { getSupabaseAdmin } = await import("@/lib/supabase-admin")
+    const supabase = getSupabaseAdmin()
 
-    const { data, error } = await supabase
-      .from("code_generations")
-      .select("*, specifications(app_name), designs(type)")
-      .eq("id", id)
-      .single()
+    const { data, error } = await supabase.from("code_generations").select("*").eq("id", id).single()
 
     if (error) {
-      throw error
+      console.error("Error fetching generated code by ID:", error)
+      return { success: false, error: error.message }
     }
 
-    return {
-      success: true,
-      data,
-    }
+    return { success: true, data }
   } catch (error) {
-    console.error("Error fetching generated code by ID:", error)
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Failed to fetch generated code. Please try again.",
-    }
+    console.error("Error in getGeneratedCodeById:", error)
+    return { success: false, error: error.message }
   }
 }
 

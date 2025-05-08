@@ -1,109 +1,86 @@
-import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { NextResponse } from "next/server"
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
 
-export async function POST() {
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
+export async function GET() {
   try {
     const supabase = getSupabaseAdmin()
 
-    // Check if the test_cases table exists
-    const { data: tables, error: tablesError } = await supabase
-      .from("pg_tables")
-      .select("tablename")
-      .eq("schemaname", "public")
-      .eq("tablename", "test_cases")
+    // SQL to create the test_cases table with minimal columns
+    const createTableSQL = `
+    CREATE TABLE IF NOT EXISTS test_cases (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name TEXT,
+      test_type TEXT,
+      framework TEXT,
+      component_to_test TEXT,
+      generated_tests JSONB,
+      specification_id UUID,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    `
 
-    if (tablesError) {
-      console.error("Error checking if table exists:", tablesError)
-      return NextResponse.json(
-        { success: false, message: `Error checking if table exists: ${tablesError.message}` },
-        { status: 500 },
-      )
+    // Try to execute the SQL
+    try {
+      const { error } = await supabase.sql(createTableSQL)
+
+      if (error) {
+        console.error("Error creating table with SQL:", error)
+        return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      }
+    } catch (sqlError) {
+      console.error("Exception executing SQL:", sqlError)
+
+      // If SQL execution fails, try a different approach
+      try {
+        // Check if the table exists
+        const { data, error: checkError } = await supabase.from("test_cases").select("id").limit(1)
+
+        if (checkError) {
+          // Table doesn't exist, try to create it using insert
+          const { error: insertError } = await supabase.from("test_cases").insert([
+            {
+              name: "Test Table Setup",
+              test_type: "setup",
+              framework: "none",
+              component_to_test: "none",
+              generated_tests: JSON.stringify({ setup: true }),
+            },
+          ])
+
+          if (insertError && !insertError.message.includes("already exists")) {
+            console.error("Error creating table with insert:", insertError)
+            return NextResponse.json({ success: false, error: insertError.message }, { status: 500 })
+          }
+        }
+      } catch (fallbackError) {
+        console.error("Fallback approach failed:", fallbackError)
+        return NextResponse.json({ success: false, error: fallbackError.message }, { status: 500 })
+      }
     }
 
-    let message = ""
+    // Check if the table was created successfully
+    try {
+      const { data, error: checkError } = await supabase.from("test_cases").select("id").limit(1)
 
-    // If the table doesn't exist, create it
-    if (!tables || tables.length === 0) {
-      const createTableQuery = `
-        CREATE TABLE test_cases (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          project_id UUID,
-          test_type TEXT NOT NULL,
-          framework TEXT NOT NULL,
-          component_to_test TEXT NOT NULL,
-          generated_tests TEXT,
-          component TEXT,
-          name TEXT,
-          specification_id UUID,
-          created_at TIMESTAMPTZ DEFAULT now(),
-          updated_at TIMESTAMPTZ DEFAULT now()
-        );
-        
-        -- Disable RLS for this table
-        ALTER TABLE test_cases DISABLE ROW LEVEL SECURITY;
-      `
-
-      const { error: createError } = await supabase.rpc("exec", { query: createTableQuery })
-
-      if (createError) {
-        console.error("Error creating test_cases table:", createError)
-        return NextResponse.json(
-          { success: false, message: `Error creating test_cases table: ${createError.message}` },
-          { status: 500 },
-        )
+      if (checkError) {
+        console.error("Error checking if table exists:", checkError)
+        return NextResponse.json({ success: false, error: checkError.message }, { status: 500 })
       }
 
-      message = "Created test_cases table successfully with RLS disabled."
-    } else {
-      // If the table exists, make sure RLS is disabled
-      const disableRlsQuery = `
-        ALTER TABLE test_cases DISABLE ROW LEVEL SECURITY;
-      `
-
-      const { error: rlsError } = await supabase.rpc("exec", { query: disableRlsQuery })
-
-      if (rlsError) {
-        console.error("Error disabling RLS:", rlsError)
-        return NextResponse.json(
-          { success: false, message: `Error disabling RLS: ${rlsError.message}` },
-          { status: 500 },
-        )
-      }
-
-      message = "The test_cases table already exists. RLS has been disabled."
+      return NextResponse.json({
+        success: true,
+        message: "Test cases table set up successfully",
+        tableExists: true,
+      })
+    } catch (checkError) {
+      console.error("Error checking table:", checkError)
+      return NextResponse.json({ success: false, error: checkError.message }, { status: 500 })
     }
-
-    // Get the current schema of the test_cases table
-    const { data: columns, error: columnsError } = await supabase.rpc("exec", {
-      query: `
-        SELECT column_name, data_type, is_nullable
-        FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'test_cases'
-        ORDER BY ordinal_position;
-      `,
-    })
-
-    if (columnsError) {
-      console.error("Error getting table schema:", columnsError)
-      return NextResponse.json(
-        { success: false, message: `Error getting table schema: ${columnsError.message}` },
-        { status: 500 },
-      )
-    }
-
-    return NextResponse.json({
-      success: true,
-      message,
-      columns: columns,
-    })
   } catch (error) {
     console.error("Error in setup-database route:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        message: error instanceof Error ? error.message : "An unknown error occurred",
-      },
-      { status: 500 },
-    )
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 }

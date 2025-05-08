@@ -8,6 +8,9 @@ import { format } from "date-fns"
 import { notFound } from "next/navigation"
 import DownloadButton from "./download-button"
 
+export const dynamic = "force-dynamic"
+export const revalidate = 0
+
 export default async function TestPage({ params }) {
   const { id } = params
   const result = await getTestCasesById(id)
@@ -113,10 +116,26 @@ export default async function TestPage({ params }) {
                 <p className="font-mono text-sm">{test.component_to_test || test.component || "Not specified"}</p>
               </div>
 
-              {test.specification_id && (
+              {test.specifications && (
                 <div>
-                  <h3 className="text-sm font-medium">Specification ID</h3>
-                  <p className="font-mono text-xs truncate">{test.specification_id}</p>
+                  <h3 className="text-sm font-medium">Specification</h3>
+                  <p>{test.specifications.app_name || "Unknown"}</p>
+                </div>
+              )}
+
+              {test.designs && (
+                <div>
+                  <h3 className="text-sm font-medium">Design</h3>
+                  <p>{test.designs.type?.charAt(0).toUpperCase() + test.designs.type?.slice(1) || "Unknown"}</p>
+                </div>
+              )}
+
+              {test.code_generations && (
+                <div>
+                  <h3 className="text-sm font-medium">Generated Code</h3>
+                  <p>
+                    {test.code_generations.language} - {test.code_generations.framework}
+                  </p>
                 </div>
               )}
             </CardContent>

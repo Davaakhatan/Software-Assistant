@@ -7,14 +7,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Check, Download, Plus, Save, Sparkles, TestTube, Trash, Wand2 } from "lucide-react"
+import { Check, Download, Plus, RefreshCw, Save, Sparkles, TestTube, Trash, Wand2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
 import { getDesigns } from "../design/actions"
 import { getSupabase } from "@/lib/supabase"
-import { generateAITestCases, saveTestCases } from "./actions"
+import { generateAITestCases, saveTestCases, getGeneratedCodeById } from "./actions"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
+import { getGeneratedCode } from "../code-generation/actions"
 
 export default function TestCaseGenerator() {
   const { toast } = useToast()
@@ -31,6 +32,7 @@ export default function TestCaseGenerator() {
   const [activeTab, setActiveTab] = useState("define")
   const [testName, setTestName] = useState("")
   const [useAI, setUseAI] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
 
   // Added for integration with specifications and designs
   const [specificationsList, setSpecificationsList] = useState([])
@@ -42,25 +44,44 @@ export default function TestCaseGenerator() {
   const [specificationData, setSpecificationData] = useState(null)
   const [designData, setDesignData] = useState(null)
 
+  // Added for integration with generated code
+  const [generatedCodeList, setGeneratedCodeList] = useState([])
+  const [selectedCodeId, setSelectedCodeId] = useState("")
+  const [isLoadingCode, setIsLoadingCode] = useState(false)
+  const [generatedCodeData, setGeneratedCodeData] = useState(null)
+
   // Fetch specifications list on component mount
   useEffect(() => {
-    const fetchSpecifications = async () => {
-      try {
-        const result = await getSpecifications()
-        if (result.success) {
-          setSpecificationsList(result.data || [])
-        } else {
-          console.error("Failed to load specifications:", result.error)
-        }
-      } catch (error) {
-        console.error("Error fetching specifications:", error)
-      } finally {
-        setIsLoadingSpecifications(false)
-      }
-    }
-
     fetchSpecifications()
   }, [])
+
+  const fetchSpecifications = async () => {
+    setIsLoadingSpecifications(true)
+    try {
+      console.log("Fetching specifications...")
+      const result = await getSpecifications()
+      if (result.success) {
+        console.log(`Fetched ${result.data?.length || 0} specifications`)
+        setSpecificationsList(result.data || [])
+      } else {
+        console.error("Failed to load specifications:", result.error)
+        toast({
+          title: "Error loading specifications",
+          description: result.error || "Failed to load specifications",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error fetching specifications:", error)
+      toast({
+        title: "Error",
+        description: "Failed to fetch specifications. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingSpecifications(false)
+    }
+  }
 
   // Fetch specification details when a specification is selected
   useEffect(() => {
@@ -71,8 +92,10 @@ export default function TestCaseGenerator() {
       }
 
       try {
+        console.log(`Fetching details for specification: ${selectedSpecificationId}`)
         const result = await getSpecificationById(selectedSpecificationId)
         if (result.success) {
+          console.log("Specification details fetched successfully")
           setSpecificationData(result.data)
 
           // Set default test name based on specification
@@ -96,59 +119,97 @@ export default function TestCaseGenerator() {
           )
         } else {
           console.error("Failed to load specification details:", result.error)
+          toast({
+            title: "Error",
+            description: "Failed to load specification details",
+            variant: "destructive",
+          })
         }
       } catch (error) {
         console.error("Error fetching specification details:", error)
+        toast({
+          title: "Error",
+          description: "Failed to fetch specification details",
+          variant: "destructive",
+        })
       }
     }
 
     fetchSpecificationDetails()
-  }, [selectedSpecificationId, testType])
+  }, [selectedSpecificationId, testType, toast])
 
   // Fetch designs when a specification is selected
   useEffect(() => {
-    const fetchDesigns = async () => {
-      if (!selectedSpecificationId) {
+    fetchDesigns()
+  }, [selectedSpecificationId])
+
+  const fetchDesigns = async () => {
+    if (!selectedSpecificationId) {
+      setDesignsList([])
+      return
+    }
+
+    setIsLoadingDesigns(true)
+    try {
+      console.log(`Fetching designs for specification: ${selectedSpecificationId}`)
+
+      // First, find requirements linked to this specification
+      const supabase = getSupabase()
+      const { data: requirements, error: requirementError } = await supabase
+        .from("requirements")
+        .select("id")
+        .eq("specification_id", selectedSpecificationId)
+
+      if (requirementError) {
+        console.error("Error fetching requirements:", requirementError)
+        toast({
+          title: "Error",
+          description: "Failed to fetch requirements",
+          variant: "destructive",
+        })
         setDesignsList([])
+        setIsLoadingDesigns(false)
         return
       }
 
-      setIsLoadingDesigns(true)
-      try {
-        // First, find a requirement linked to this specification
-        const supabase = getSupabase()
-        const { data: requirement, error: requirementError } = await supabase
-          .from("requirements")
-          .select("id")
-          .eq("specification_id", selectedSpecificationId)
-          .maybeSingle()
-
-        if (requirementError || !requirement) {
-          // No linked requirement found, so no designs
-          setDesignsList([])
-          return
-        }
-
-        // Now get designs for this requirement
-        const result = await getDesigns()
-        if (result.success) {
-          // Filter designs to only include those for this requirement
-          const filteredDesigns = result.data.filter(
-            (design) => design.project_id && requirement.id === design.requirement_id,
-          )
-          setDesignsList(filteredDesigns || [])
-        } else {
-          console.error("Failed to load designs:", result.error)
-        }
-      } catch (error) {
-        console.error("Error fetching designs:", error)
-      } finally {
+      if (!requirements || requirements.length === 0) {
+        console.log("No requirements found for this specification")
+        setDesignsList([])
         setIsLoadingDesigns(false)
+        return
       }
-    }
 
-    fetchDesigns()
-  }, [selectedSpecificationId])
+      const requirementIds = requirements.map((req) => req.id)
+      console.log(`Found ${requirementIds.length} requirements for this specification`)
+
+      // Now get designs for these requirements
+      const result = await getDesigns()
+      if (result.success) {
+        // Filter designs to only include those for these requirements
+        const filteredDesigns = result.data.filter(
+          (design) => design.requirement_id && requirementIds.includes(design.requirement_id),
+        )
+        console.log(`Found ${filteredDesigns.length} designs for these requirements`)
+        setDesignsList(filteredDesigns || [])
+      } else {
+        console.error("Failed to load designs:", result.error)
+        toast({
+          title: "Error",
+          description: "Failed to load designs",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error fetching designs:", error)
+      toast({
+        title: "Error",
+        description: "Failed to fetch designs",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingDesigns(false)
+    }
+  }
 
   // Fetch design details when a design is selected
   useEffect(() => {
@@ -159,22 +220,106 @@ export default function TestCaseGenerator() {
       }
 
       try {
+        console.log(`Fetching details for design: ${selectedDesignId}`)
         const supabase = getSupabase()
         const { data, error } = await supabase.from("designs").select("*").eq("id", selectedDesignId).single()
 
         if (error) {
           console.error("Error fetching design details:", error)
+          toast({
+            title: "Error",
+            description: "Failed to fetch design details",
+            variant: "destructive",
+          })
           return
         }
 
+        console.log("Design details fetched successfully")
         setDesignData(data)
       } catch (error) {
         console.error("Error fetching design details:", error)
+        toast({
+          title: "Error",
+          description: "Failed to fetch design details",
+          variant: "destructive",
+        })
       }
     }
 
     fetchDesignDetails()
-  }, [selectedDesignId])
+  }, [selectedDesignId, toast])
+
+  // Fetch generated code list
+  useEffect(() => {
+    fetchGeneratedCode()
+  }, [selectedSpecificationId])
+
+  const fetchGeneratedCode = async () => {
+    if (!selectedSpecificationId) {
+      setGeneratedCodeList([])
+      return
+    }
+
+    setIsLoadingCode(true)
+    try {
+      console.log("Fetching generated code...")
+      const result = await getGeneratedCode()
+      if (result.success) {
+        // Filter code to only include those for this specification
+        const filteredCode = result.data.filter((code) => code.specification_id === selectedSpecificationId)
+        console.log(`Found ${filteredCode.length} code generations for this specification`)
+        setGeneratedCodeList(filteredCode || [])
+      } else {
+        console.error("Failed to load generated code:", result.error)
+      }
+    } catch (error) {
+      console.error("Error fetching generated code:", error)
+    } finally {
+      setIsLoadingCode(false)
+    }
+  }
+
+  // Fetch generated code details when a code is selected
+  useEffect(() => {
+    const fetchGeneratedCodeDetails = async () => {
+      if (!selectedCodeId) {
+        setGeneratedCodeData(null)
+        return
+      }
+
+      try {
+        console.log(`Fetching details for generated code: ${selectedCodeId}`)
+        const result = await getGeneratedCodeById(selectedCodeId)
+        if (result.success) {
+          console.log("Generated code details fetched successfully")
+          setGeneratedCodeData(result.data)
+
+          // Update component to test based on the generated code
+          if (result.data.language === "typescript" || result.data.language === "javascript") {
+            // Try to extract component name from the code
+            const code = result.data.generated_code || ""
+            const componentMatch = code.match(/function\s+([A-Za-z0-9_]+)\s*\(/)
+            const classMatch = code.match(/class\s+([A-Za-z0-9_]+)\s+/)
+            const exportMatch = code.match(/export\s+default\s+function\s+([A-Za-z0-9_]+)\s*\(/)
+
+            const componentName = exportMatch?.[1] || componentMatch?.[1] || classMatch?.[1] || "Component"
+            setComponentToTest(componentName)
+
+            // Set component description based on the code
+            setComponentDescription(
+              `Generated ${result.data.language} component using ${result.data.framework} framework.`,
+            )
+          }
+        } else {
+          console.error("Failed to load generated code details:", result.error)
+        }
+      } catch (error) {
+        console.error("Error fetching generated code details:", error)
+      }
+    }
+
+    fetchGeneratedCodeDetails()
+  }, [selectedCodeId])
 
   const addTestCase = () => {
     setTestCases([...testCases, { description: "", expectation: "" }])
@@ -192,7 +337,32 @@ export default function TestCaseGenerator() {
     setTestCases(updatedTestCases)
   }
 
-  // Function to generate test cases using AI
+  // Function to refresh all data
+  const refreshData = async () => {
+    setIsRefreshing(true)
+    try {
+      await fetchSpecifications()
+      if (selectedSpecificationId) {
+        await fetchDesigns()
+        await fetchGeneratedCode()
+      }
+      toast({
+        title: "Data refreshed",
+        description: "All data has been refreshed successfully.",
+      })
+    } catch (error) {
+      console.error("Error refreshing data:", error)
+      toast({
+        title: "Error",
+        description: "Failed to refresh data. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
+
+  // Update only the generateWithAI function:
   const generateWithAI = async () => {
     if (!componentToTest.trim()) {
       toast({
@@ -215,6 +385,7 @@ export default function TestCaseGenerator() {
         componentDescription,
         specificationData,
         designData,
+        generatedCodeData,
       })
 
       if (!result.success) {
@@ -222,7 +393,16 @@ export default function TestCaseGenerator() {
       }
 
       // Update the UI with the generated test cases and code
-      setTestCases(result.testCases || [])
+      if (Array.isArray(result.testCases) && result.testCases.length > 0) {
+        setTestCases(result.testCases)
+      } else {
+        // Fallback if no test cases were returned
+        setTestCases([
+          { description: "should render correctly", expectation: "component renders without errors" },
+          { description: "should handle user interactions", expectation: "component responds to user actions" },
+        ])
+      }
+
       setGeneratedTests(result.testCode || "")
 
       toast({
@@ -231,9 +411,20 @@ export default function TestCaseGenerator() {
       })
     } catch (error) {
       console.error("Error generating tests with AI:", error)
+
+      // Even if there's an error, try to show something useful
+      setTestCases([
+        { description: "should render correctly", expectation: "component renders without errors" },
+        { description: "should handle user interactions", expectation: "component responds to user actions" },
+      ])
+
+      setGeneratedTests(
+        `// Error generating tests: ${error.message}\n\n// Here's a basic test structure you can customize:\n\nimport { render, screen } from '@testing-library/react';\nimport ${componentToTest} from './${componentToTest}';\n\ndescribe('${componentToTest}', () => {\n  test('should render correctly', () => {\n    render(<${componentToTest} />);\n    // Add your assertions here\n  });\n});`,
+      )
+
       toast({
         title: "Error",
-        description: error.message || "Failed to generate tests with AI",
+        description: "There was an issue generating tests with AI. Basic test structure provided instead.",
         variant: "destructive",
       })
     } finally {
@@ -687,6 +878,8 @@ describe('${componentToTest.split("/").pop()}', () => {
         testCases,
         generatedTests,
         specificationId: selectedSpecificationId,
+        designId: selectedDesignId || null,
+        generatedCodeId: selectedCodeId || null,
         name: testName,
       })
 
@@ -776,6 +969,13 @@ describe('${componentToTest.split("/").pop()}', () => {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end mb-4">
+        <Button variant="outline" onClick={refreshData} disabled={isRefreshing} className="gap-2">
+          <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+          {isRefreshing ? "Refreshing..." : "Refresh Data"}
+        </Button>
+      </div>
+
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="define">Define Tests</TabsTrigger>
@@ -811,11 +1011,15 @@ describe('${componentToTest.split("/").pop()}', () => {
                         <SelectValue placeholder="Select a specification" />
                       </SelectTrigger>
                       <SelectContent>
-                        {specificationsList.map((spec) => (
-                          <SelectItem key={spec.id} value={spec.id}>
-                            {spec.app_name}
-                          </SelectItem>
-                        ))}
+                        {specificationsList.length === 0 ? (
+                          <SelectItem value="no_specifications">No specifications available</SelectItem>
+                        ) : (
+                          specificationsList.map((spec) => (
+                            <SelectItem key={spec.id} value={spec.id}>
+                              {spec.app_name}
+                            </SelectItem>
+                          ))
+                        )}
                       </SelectContent>
                     </Select>
                     {isLoadingSpecifications && (
@@ -836,6 +1040,7 @@ describe('${componentToTest.split("/").pop()}', () => {
                         />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="no_design">None</SelectItem>
                         {designsList.map((design) => (
                           <SelectItem key={design.id} value={design.id}>
                             {design.type.charAt(0).toUpperCase() + design.type.slice(1)} Design
@@ -845,6 +1050,32 @@ describe('${componentToTest.split("/").pop()}', () => {
                     </Select>
                     {isLoadingDesigns && <p className="text-sm text-muted-foreground">Loading designs...</p>}
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="generated-code">Select Generated Code (Optional)</Label>
+                  <Select
+                    value={selectedCodeId}
+                    onValueChange={setSelectedCodeId}
+                    disabled={isLoadingCode || !selectedSpecificationId || generatedCodeList.length === 0}
+                  >
+                    <SelectTrigger id="generated-code">
+                      <SelectValue
+                        placeholder={
+                          generatedCodeList.length === 0 ? "No generated code available" : "Select generated code"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="no_code">None</SelectItem>
+                      {generatedCodeList.map((code) => (
+                        <SelectItem key={code.id} value={code.id}>
+                          {code.language} - {code.framework} ({new Date(code.created_at).toLocaleDateString()})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {isLoadingCode && <p className="text-sm text-muted-foreground">Loading generated code...</p>}
                 </div>
 
                 <div className="flex justify-end">
