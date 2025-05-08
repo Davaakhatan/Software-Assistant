@@ -2,12 +2,27 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
 import { ArrowLeft, Plus } from "lucide-react"
-import { getSpecifications } from "../specification-generator/actions"
 import { formatDate } from "@/lib/utils"
 import DeleteSpecificationButton from "../specifications/[id]/delete-button"
+import { getSupabaseServer } from "@/lib/supabase-server"
+
+// Force dynamic rendering and disable caching
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
 export default async function SpecificationsList() {
-  const { data: specifications, success } = await getSpecifications()
+  // Get specifications directly from the database to ensure we have the latest data
+  const supabase = getSupabaseServer()
+  const { data: specifications, error } = await supabase
+    .from("specifications")
+    .select("*")
+    .order("created_at", { ascending: false })
+
+  if (error) {
+    console.error("Error fetching specifications:", error)
+  }
+
+  const success = !error && specifications !== null
 
   return (
     <div className="container mx-auto px-4 py-12">
