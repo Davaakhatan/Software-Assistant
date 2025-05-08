@@ -1,12 +1,8 @@
 "use client"
 
-import { CardTitle } from "@/components/ui/card"
-
-import { CardHeader } from "@/components/ui/card"
-
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,7 +11,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { generateFromImprovedSpecification, saveGeneratedCodeImproved } from "../improved-actions"
+import { generateFromImprovedSpecification, saveGeneratedCodeImproved } from "../improved-actions.server"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism"
 
