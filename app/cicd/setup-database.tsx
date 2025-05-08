@@ -58,7 +58,25 @@ CREATE TABLE IF NOT EXISTS pipelines (
 -- Add indexes for faster lookups
 CREATE INDEX IF NOT EXISTS pipelines_specification_id_idx ON pipelines(specification_id);
 CREATE INDEX IF NOT EXISTS pipelines_design_id_idx ON pipelines(design_id);
-  `
+
+-- Create the ci_cd_pipelines table for compatibility
+CREATE TABLE IF NOT EXISTS ci_cd_pipelines (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  project_name TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  pipeline_type TEXT NOT NULL,
+  pipeline_code TEXT NOT NULL,
+  specification_id UUID,
+  design_id UUID,
+  metadata JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Add indexes for faster lookups
+CREATE INDEX IF NOT EXISTS ci_cd_pipelines_specification_id_idx ON ci_cd_pipelines(specification_id);
+`
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)

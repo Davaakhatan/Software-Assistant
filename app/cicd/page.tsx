@@ -113,7 +113,7 @@ export default async function CICDPage() {
                         <li key={pipeline.id}>
                           <Link href={`/cicd/${pipeline.id}`} className="block">
                             <div className="rounded-md border p-3 hover:bg-muted transition-colors">
-                              <div className="font-medium">{pipeline.name}</div>
+                              <div className="font-medium">{pipeline.name || pipeline.project_name}</div>
                               <div className="text-sm text-muted-foreground">
                                 {new Date(pipeline.created_at).toLocaleDateString()}
                               </div>

@@ -16,8 +16,10 @@ import { getSpecifications, getSpecificationById } from "../specification-genera
 import { savePipeline } from "./actions"
 import { useAIProvider } from "@/context/ai-provider-context"
 import { generateAIText } from "@/lib/ai-service"
+import { useRouter } from "next/navigation"
 
 export function CICDPipelineBuilder() {
+  const router = useRouter()
   const { toast } = useToast()
   const { provider, temperature } = useAIProvider()
   const [pipelineType, setPipelineType] = useState("github")
@@ -231,6 +233,17 @@ Please provide ONLY the pipeline configuration code for ${pipelineType}, without
         toast({
           title: "Pipeline saved",
           description: "Your CI/CD pipeline has been saved successfully.",
+        })
+      } else if (result.needsSetup) {
+        toast({
+          title: "Database setup required",
+          description: "The database tables need to be set up before saving pipelines.",
+          variant: "destructive",
+          action: (
+            <Button variant="outline" size="sm" onClick={() => router.push("/cicd/setup-database")}>
+              Setup Now
+            </Button>
+          ),
         })
       } else {
         throw new Error(result.error || "Failed to save pipeline")
