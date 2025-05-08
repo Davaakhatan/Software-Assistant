@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -9,8 +9,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { generateCode, generateFromSpecificationAndDesign, saveGeneratedCode } from "./actions"
-import { Loader2, Code, Save, Copy, Download } from "lucide-react"
+import { Loader2, Code, Save, Copy, Download, RefreshCw } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { useRouter } from "next/navigation"
 
 interface CodeGenerationFormProps {
   specifications: any[]
@@ -19,6 +20,7 @@ interface CodeGenerationFormProps {
 
 export default function CodeGenerationForm({ specifications, designs }: CodeGenerationFormProps) {
   const { toast } = useToast()
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState("fromSpecDesign")
   const [specId, setSpecId] = useState("")
   const [designId, setDesignId] = useState("")
@@ -28,8 +30,17 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
   const [generatedCode, setGeneratedCode] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [fileName, setFileName] = useState("")
   const [filteredDesigns, setFilteredDesigns] = useState<any[]>([])
+
+  // Reset specId if the selected specification no longer exists
+  useEffect(() => {
+    if (specId && !specifications.some((spec) => spec.id === specId)) {
+      setSpecId("")
+      setFilteredDesigns([])
+    }
+  }, [specifications, specId])
 
   // Update filtered designs when specification changes
   const handleSpecificationChange = (id: string) => {
@@ -50,6 +61,21 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
       setFilteredDesigns([])
       setDesignId("")
     }
+  }
+
+  const handleRefresh = () => {
+    setIsRefreshing(true)
+    // Force a refresh of the page data
+    router.refresh()
+
+    // Set a timeout to reset the refreshing state after a short delay
+    setTimeout(() => {
+      setIsRefreshing(false)
+      toast({
+        title: "Data refreshed",
+        description: "The specifications list has been refreshed",
+      })
+    }, 1000)
   }
 
   const handleGenerate = async () => {
@@ -217,8 +243,22 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Generate Code</CardTitle>
-          <CardDescription>Generate code from specifications, designs, or custom requirements</CardDescription>
+          <div className="flex justify-between items-center">
+            <div>
+              <CardTitle>Generate Code</CardTitle>
+              <CardDescription>Generate code from specifications, designs, or custom requirements</CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="flex items-center gap-2"
+            >
+              {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Refresh Data
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -244,6 +284,11 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
                       ))}
                     </SelectContent>
                   </Select>
+                  {specifications.length === 0 && (
+                    <p className="text-sm text-muted-foreground mt-2">
+                      No specifications available. Please create a specification first.
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -259,7 +304,8 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
+                      {/* Fixed: Changed empty string to "no_design" */}
+                      <SelectItem value="no_design">None</SelectItem>
                       {filteredDesigns.map((design) => (
                         <SelectItem key={design.id} value={design.id}>
                           {design.type === "architecture"
@@ -277,7 +323,7 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div className="space-y-2">
                   <Label htmlFor="language-spec">Programming Language</Label>
-                  <Select value={language} onValueChange={setLanguage}>
+                  <Select value={language} onValueChange={setLanguage} defaultValue={language}>
                     <SelectTrigger id="language-spec">
                       <SelectValue placeholder="Select a language" />
                     </SelectTrigger>
@@ -292,7 +338,7 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="framework-spec">Framework</Label>
-                  <Select value={framework} onValueChange={setFramework}>
+                  <Select value={framework} onValueChange={setFramework} defaultValue={framework}>
                     <SelectTrigger id="framework-spec">
                       <SelectValue placeholder="Select a framework" />
                     </SelectTrigger>
@@ -339,7 +385,7 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="framework-manual">Framework</Label>
-                  <Select value={framework} onValueChange={setFramework}>
+                  <Select value={framework} onValueChange={setFramework} defaultValue={framework}>
                     <SelectTrigger id="framework-manual">
                       <SelectValue placeholder="Select a framework" />
                     </SelectTrigger>
@@ -358,7 +404,11 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
           </Tabs>
 
           <div className="flex justify-end mt-6">
-            <Button onClick={handleGenerate} disabled={isGenerating} className="flex items-center gap-2">
+            <Button
+              onClick={handleGenerate}
+              disabled={isGenerating || (activeTab === "fromSpecDesign" && !specId)}
+              className="flex items-center gap-2"
+            >
               {isGenerating ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />

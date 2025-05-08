@@ -11,6 +11,11 @@ export async function getSpecifications() {
     console.log("Supabase URL available:", !!process.env.NEXT_PUBLIC_SUPABASE_URL || !!process.env.SUPABASE_URL)
     console.log("Supabase Key available:", !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY))
 
+    // Force revalidation of paths that might use this data
+    revalidatePath("/code-generation")
+    revalidatePath("/specifications-list")
+    revalidatePath("/specifications")
+
     const { data, error } = await supabaseServer
       .from("specifications")
       .select("*")
