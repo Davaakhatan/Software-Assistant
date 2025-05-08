@@ -1,6 +1,5 @@
-import { getDesigns } from "@/app/design/actions"
-import CodeGenerationForm from "./code-generation-form"
 import { getSupabaseServer } from "@/lib/supabase-server"
+import CodeGenerationForm from "./code-generation-form"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -24,14 +23,23 @@ export default async function CodeGenerationPage() {
     console.error("Error fetching specifications:", specError)
   }
 
-  // Fetch designs
-  const designsResult = await getDesigns()
-  const designs = designsResult.success ? designsResult.data : []
+  // Fetch designs with more complete information
+  const { data: designs, error: designError } = await supabase
+    .from("designs")
+    .select("*, requirements(*, specification_id)")
+    .order("created_at", { ascending: false })
+
+  if (designError) {
+    console.error("Error fetching designs:", designError)
+  }
+
+  // Log for debugging
+  console.log(`Fetched ${specifications?.length || 0} specifications and ${designs?.length || 0} designs`)
 
   return (
     <div className="container mx-auto py-6">
       <h1 className="text-3xl font-bold mb-6">Code Generation</h1>
-      <CodeGenerationForm specifications={specifications || []} designs={designs} />
+      <CodeGenerationForm specifications={specifications || []} designs={designs || []} />
 
       {/* Tips and Next Steps */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">

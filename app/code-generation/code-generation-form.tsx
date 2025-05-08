@@ -34,6 +34,11 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
   const [fileName, setFileName] = useState("")
   const [filteredDesigns, setFilteredDesigns] = useState<any[]>([])
 
+  // Debug log for designs
+  useEffect(() => {
+    console.log("All designs:", designs)
+  }, [designs])
+
   // Reset specId if the selected specification no longer exists
   useEffect(() => {
     if (specId && !specifications.some((spec) => spec.id === specId)) {
@@ -47,14 +52,26 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
     setSpecId(id)
     console.log("Selected specification ID:", id)
 
-    if (id) {
+    if (id && id !== "none") {
       console.log("Filtering designs for specification:", id)
-      const relatedDesigns = designs.filter((design) => {
-        // Check if the design is related to this specification
+
+      // First, try to find designs directly linked to this specification via requirements
+      let relatedDesigns = designs.filter((design) => {
         const requirement = design.requirements
         return requirement && requirement.specification_id === id
       })
-      console.log(`Found ${relatedDesigns.length} related designs`)
+
+      // If no designs found, try to find designs linked to this specification via project_name
+      if (relatedDesigns.length === 0) {
+        const spec = specifications.find((s) => s.id === id)
+        if (spec && spec.app_name) {
+          relatedDesigns = designs.filter(
+            (design) => design.project_name && design.project_name.toLowerCase() === spec.app_name.toLowerCase(),
+          )
+        }
+      }
+
+      console.log(`Found ${relatedDesigns.length} related designs:`, relatedDesigns)
       setFilteredDesigns(relatedDesigns)
       setDesignId("") // Reset design selection
     } else {
@@ -73,13 +90,13 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
       setIsRefreshing(false)
       toast({
         title: "Data refreshed",
-        description: "The specifications list has been refreshed",
+        description: "The specifications and designs list has been refreshed",
       })
     }, 1000)
   }
 
   const handleGenerate = async () => {
-    if (activeTab === "fromSpecDesign" && !specId) {
+    if (activeTab === "fromSpecDesign" && (!specId || specId === "none")) {
       toast({
         title: "Error",
         description: "Please select a specification",
@@ -296,7 +313,7 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
                   <Select
                     value={designId}
                     onValueChange={setDesignId}
-                    disabled={!specId || filteredDesigns.length === 0}
+                    disabled={!specId || specId === "none" || filteredDesigns.length === 0}
                   >
                     <SelectTrigger id="design">
                       <SelectValue
@@ -304,7 +321,6 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      {/* Fixed: Changed empty string to "no_design" */}
                       <SelectItem value="no_design">None</SelectItem>
                       {filteredDesigns.map((design) => (
                         <SelectItem key={design.id} value={design.id}>
@@ -317,6 +333,11 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
                       ))}
                     </SelectContent>
                   </Select>
+                  {specId && specId !== "none" && filteredDesigns.length === 0 && (
+                    <p className="text-sm text-muted-foreground mt-2">
+                      No designs found for this specification. Please create a design first.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -406,7 +427,7 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
           <div className="flex justify-end mt-6">
             <Button
               onClick={handleGenerate}
-              disabled={isGenerating || (activeTab === "fromSpecDesign" && !specId)}
+              disabled={isGenerating || (activeTab === "fromSpecDesign" && (!specId || specId === "none"))}
               className="flex items-center gap-2"
             >
               {isGenerating ? (
