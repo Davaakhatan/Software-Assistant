@@ -13,8 +13,6 @@ import { Textarea } from "@/components/ui/textarea"
 import { Download, GitBranch, Loader2, Save, Wand2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
-import { getDesigns } from "../design/actions"
-import { getSupabase } from "@/lib/supabase"
 import { savePipeline } from "./actions"
 import { useAIProvider } from "@/context/ai-provider-context"
 import { generateAIText } from "@/lib/ai-service"
@@ -67,40 +65,37 @@ export function CICDPipelineBuilder() {
 
       setIsLoadingDesigns(true)
       try {
-        // First, find a requirement linked to this specification
-        const supabase = getSupabase()
-        const { data: requirement, error: requirementError } = await supabase
-          .from("requirements")
-          .select("id")
-          .eq("specification_id", selectedSpecificationId)
-          .maybeSingle()
+        console.log("Fetching designs for specification:", selectedSpecificationId)
 
-        if (requirementError || !requirement) {
-          // No linked requirement found, so no designs
-          setDesignsList([])
-          return
+        // Direct API call to get designs for this specification
+        const response = await fetch(`/api/designs?specificationId=${selectedSpecificationId}`)
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`)
         }
 
-        // Now get designs for this requirement
-        const result = await getDesigns()
-        if (result.success) {
-          // Filter designs to only include those for this requirement
-          const filteredDesigns = result.data.filter(
-            (design) => design.project_id && requirement.id === design.requirement_id,
-          )
-          setDesignsList(filteredDesigns || [])
+        const designs = await response.json()
+        console.log("Fetched designs:", designs)
+
+        if (designs && designs.length > 0) {
+          setDesignsList(designs)
         } else {
-          console.error("Failed to load designs:", result.error)
+          console.log("No designs found for this specification")
+          setDesignsList([])
         }
       } catch (error) {
         console.error("Error fetching designs:", error)
+        toast({
+          title: "Error",
+          description: "Failed to load designs. Please try again.",
+          variant: "destructive",
+        })
       } finally {
         setIsLoadingDesigns(false)
       }
     }
 
     fetchDesigns()
-  }, [selectedSpecificationId])
+  }, [selectedSpecificationId, toast])
 
   // Function to generate pipeline from specification
   const generateFromSpecification = async () => {
@@ -336,20 +331,31 @@ Please provide ONLY the pipeline configuration code for ${pipelineType}, without
                       onValueChange={setSelectedDesignId}
                       disabled={isLoadingDesigns || !selectedSpecificationId || designsList.length === 0}
                     >
-                      <SelectTrigger id="design">
+                      <SelectTrigger id="design" className="w-full">
                         <SelectValue
-                          placeholder={designsList.length === 0 ? "No designs available" : "Select a design"}
+                          placeholder={
+                            isLoadingDesigns
+                              ? "Loading designs..."
+                              : designsList.length === 0
+                                ? "No designs available"
+                                : "Select a design"
+                          }
                         />
                       </SelectTrigger>
                       <SelectContent>
                         {designsList.map((design) => (
                           <SelectItem key={design.id} value={design.id}>
-                            {design.type.charAt(0).toUpperCase() + design.type.slice(1)} Design
+                            {design.project_name
+                              ? `${design.project_name} - ${design.type.charAt(0).toUpperCase() + design.type.slice(1)}`
+                              : `${design.type.charAt(0).toUpperCase() + design.type.slice(1)} Design`}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     {isLoadingDesigns && <p className="text-sm text-muted-foreground">Loading designs...</p>}
+                    {!isLoadingDesigns && selectedSpecificationId && designsList.length === 0 && (
+                      <p className="text-sm text-muted-foreground">No designs found for this specification</p>
+                    )}
                   </div>
                 </div>
 

@@ -10,38 +10,75 @@ export async function GET(request: Request) {
     const specificationId = searchParams.get("specificationId")
     const projectName = searchParams.get("projectName")
 
+    console.log("Designs API called with params:", { specificationId, projectName })
+
     const supabase = getSupabaseServer()
 
-    // Start with a base query
-    let query = supabase
-      .from("designs")
-      .select("*, requirements(*, specification_id)")
-      .order("created_at", { ascending: false })
-
-    // Filter by specification ID if provided
+    // If we have a specification ID, first get all requirements for this specification
     if (specificationId) {
-      // First try to get designs directly linked to this specification via requirements
-      const { data: reqDesigns, error: reqError } = await supabase
+      console.log("Fetching designs for specification:", specificationId)
+
+      // Get all requirements for this specification
+      const { data: requirements, error: reqError } = await supabase
         .from("requirements")
         .select("id")
         .eq("specification_id", specificationId)
 
-      if (!reqError && reqDesigns && reqDesigns.length > 0) {
-        const reqIds = reqDesigns.map((req) => req.id)
-        query = query.in("requirement_id", reqIds)
-      } else if (projectName) {
+      if (reqError) {
+        console.error("Error fetching requirements:", reqError)
+        return NextResponse.json({ error: "Failed to fetch requirements" }, { status: 500 })
+      }
+
+      if (requirements && requirements.length > 0) {
+        // Get all designs for these requirements
+        const reqIds = requirements.map((req) => req.id)
+        console.log("Found requirement IDs:", reqIds)
+
+        const { data: designs, error: designsError } = await supabase
+          .from("designs")
+          .select("*")
+          .in("requirement_id", reqIds)
+          .order("created_at", { ascending: false })
+
+        if (designsError) {
+          console.error("Error fetching designs:", designsError)
+          return NextResponse.json({ error: "Failed to fetch designs" }, { status: 500 })
+        }
+
+        console.log(`Found ${designs?.length || 0} designs for specification`)
+        return NextResponse.json(designs || [])
+      } else {
+        console.log("No requirements found for specification")
+
         // If no requirements found but we have a project name, try to match by project name
-        query = query.ilike("project_name", `%${projectName}%`)
+        if (projectName) {
+          const { data: nameDesigns, error: nameError } = await supabase
+            .from("designs")
+            .select("*")
+            .ilike("project_name", `%${projectName}%`)
+            .order("created_at", { ascending: false })
+
+          if (nameError) {
+            console.error("Error fetching designs by project name:", nameError)
+          } else {
+            console.log(`Found ${nameDesigns?.length || 0} designs by project name`)
+            return NextResponse.json(nameDesigns || [])
+          }
+        }
+
+        return NextResponse.json([])
       }
     }
 
-    const { data, error } = await query
+    // If no specification ID, just get all designs
+    const { data, error } = await supabase.from("designs").select("*").order("created_at", { ascending: false })
 
     if (error) {
-      console.error("Error fetching designs:", error)
+      console.error("Error fetching all designs:", error)
       return NextResponse.json({ error: "Failed to fetch designs" }, { status: 500 })
     }
 
+    console.log(`Found ${data?.length || 0} total designs`)
     return NextResponse.json(data || [])
   } catch (error) {
     console.error("Error in designs API:", error)
