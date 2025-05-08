@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 
 export async function getDesigns() {
   try {
+    console.log("Fetching designs from actions.ts...")
     const supabaseServer = getSupabaseServer()
     const { data, error } = await supabaseServer
       .from("designs")
@@ -12,8 +13,16 @@ export async function getDesigns() {
       .order("created_at", { ascending: false })
 
     if (error) {
+      console.error("Error fetching designs:", error)
       throw error
     }
+
+    console.log(`Successfully fetched ${data?.length || 0} designs from actions.ts`)
+
+    // Revalidate paths to ensure fresh data
+    revalidatePath("/design")
+    revalidatePath("/design-list")
+    revalidatePath("/code-generation")
 
     return {
       success: true,
@@ -159,6 +168,11 @@ export async function saveDesign({ type, diagramCode, requirementId, specificati
       return { success: false, error: error.message }
     }
 
+    // Revalidate paths to ensure fresh data
+    revalidatePath("/design")
+    revalidatePath("/design-list")
+    revalidatePath("/code-generation")
+
     return { success: true, data }
   } catch (error) {
     console.error("Error in saveDesign:", error)
@@ -176,8 +190,10 @@ export async function deleteDesign(id) {
       throw error
     }
 
+    // Revalidate paths to ensure fresh data
     revalidatePath("/design")
     revalidatePath("/design-list")
+    revalidatePath("/code-generation")
 
     return {
       success: true,
@@ -269,9 +285,11 @@ export async function updateDesign(id, { type, diagramCode, requirementId }) {
       throw error
     }
 
+    // Revalidate paths to ensure fresh data
     revalidatePath("/design")
     revalidatePath(`/design/${id}`)
     revalidatePath("/design-list")
+    revalidatePath("/code-generation")
 
     return {
       success: true,

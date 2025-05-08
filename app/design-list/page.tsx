@@ -6,22 +6,41 @@ import { formatDate } from "@/lib/utils"
 import MermaidDiagram from "@/components/mermaid-diagram"
 import MermaidDiagramComponent from "@/components/mermaid-diagram-component"
 import MermaidDiagramArchitecture from "@/components/mermaid-diagram-architecture"
-import { getSupabase } from "@/lib/supabase"
+import { getSupabaseServer } from "@/lib/supabase-server"
+
+// Force dynamic rendering and disable caching
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
 export async function getDesigns() {
   try {
-    const supabase = getSupabase()
-    const { data, error } = await supabase
-      .from("designs")
-      .select("*, requirements(project_name, specification_id, specifications(app_name))")
-      .order("created_at", { ascending: false })
+    console.log("Fetching designs for design-list page...")
+    const supabase = getSupabaseServer()
+
+    // Use a simpler query first to diagnose issues
+    const { data, error } = await supabase.from("designs").select("*").order("created_at", { ascending: false })
 
     if (error) {
       console.error("Error fetching designs:", error)
       return { success: false, error: error.message }
     }
 
-    return { success: true, data }
+    console.log(`Successfully fetched ${data?.length || 0} designs`)
+
+    // Now get the full data with joins if the simple query worked
+    if (data && data.length > 0) {
+      const { data: fullData, error: fullError } = await supabase
+        .from("designs")
+        .select("*, requirements(project_name, specification_id, specifications(app_name))")
+        .order("created_at", { ascending: false })
+
+      if (!fullError) {
+        console.log(`Successfully fetched ${fullData?.length || 0} designs with full data`)
+        return { success: true, data: fullData }
+      }
+    }
+
+    return { success: true, data: data || [] }
   } catch (error) {
     console.error("Error in getDesigns:", error)
     return { success: false, error: "Failed to fetch designs" }
@@ -29,7 +48,12 @@ export async function getDesigns() {
 }
 
 export default async function DesignsList() {
-  const { data: designs, success } = await getDesigns()
+  const { data: designs, success, error } = await getDesigns()
+
+  console.log(`Rendering designs list with success=${success}, designs count=${designs?.length || 0}`)
+  if (error) {
+    console.error("Error in designs list:", error)
+  }
 
   return (
     <div className="container mx-auto px-4 py-12">
@@ -53,7 +77,7 @@ export default async function DesignsList() {
         <p className="text-muted-foreground">View and manage your system designs</p>
       </div>
 
-      {success && designs.length > 0 ? (
+      {success && designs && designs.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {designs.map((design) => (
             <Card key={design.id} className="flex flex-col">
@@ -98,7 +122,9 @@ export default async function DesignsList() {
       ) : (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <p className="text-muted-foreground mb-4">No designs found</p>
+            <p className="text-muted-foreground mb-4">
+              {error ? `Error loading designs: ${error}` : "No designs found"}
+            </p>
             <Link href="/design">
               <Button>Create Design</Button>
             </Link>
