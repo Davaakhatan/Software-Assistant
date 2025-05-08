@@ -1,91 +1,81 @@
 "use client"
 
+import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
-import { ArrowLeft, Download, ExternalLink, GitBranch } from "lucide-react"
-import DeletePipelineButton from "./delete-button"
+import { AlertCircle, Box, FileCode, Github, Gitlab } from "lucide-react"
+import DeleteButton from "./delete-button"
+import { useRouter } from "next/navigation"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
-export default function SavedPipelinesClient({ pipelines }) {
+export default function SavedPipelinesClient({ pipelines, needsSetup }) {
+  const router = useRouter()
+
+  // Function to get the appropriate icon based on pipeline type
+  const getPlatformIcon = (platform) => {
+    const type = (platform || "").toLowerCase()
+    if (type.includes("github")) return <Github className="h-5 w-5 text-gray-700" />
+    if (type.includes("gitlab")) return <Gitlab className="h-5 w-5 text-orange-600" />
+    return <Box className="h-5 w-5 text-blue-600" />
+  }
+
+  if (needsSetup) {
+    return (
+      <Alert variant="destructive" className="mb-6">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>Database setup required</AlertTitle>
+        <AlertDescription>
+          The CI/CD pipeline tables need to be set up before you can use this feature.
+          <div className="mt-2">
+            <Button variant="outline" onClick={() => router.push("/cicd/setup-database")}>
+              Setup Database
+            </Button>
+          </div>
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (!pipelines || pipelines.length === 0) {
+    return (
+      <div className="text-center p-12 border border-dashed rounded-lg">
+        <FileCode className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+        <h3 className="text-lg font-medium mb-2">No pipelines found</h3>
+        <p className="text-muted-foreground mb-4">You haven't created any CI/CD pipelines yet.</p>
+        <Button onClick={() => router.push("/cicd")}>Create Pipeline</Button>
+      </div>
+    )
+  }
+
   return (
-    <div className="container mx-auto px-4 py-12">
-      <div className="flex items-center mb-8">
-        <Link href="/cicd">
-          <Button variant="ghost" className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Back to CI/CD
-          </Button>
-        </Link>
-      </div>
-
-      <div className="flex flex-col items-start mb-8">
-        <h1 className="text-3xl font-bold tracking-tight mb-2">Saved Pipelines</h1>
-        <p className="text-muted-foreground">View and manage your saved CI/CD pipelines</p>
-      </div>
-
-      {pipelines.length === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <GitBranch className="h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground text-center mb-4">No pipelines saved yet</p>
-            <Link href="/cicd">
-              <Button>Create Pipeline</Button>
-            </Link>
+    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      {pipelines.map((pipeline) => (
+        <Card key={pipeline.id} className="overflow-hidden">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-3">
+              {getPlatformIcon(pipeline.pipeline_type || pipeline.platform)}
+              <div>
+                <h3 className="font-medium">{pipeline.name || pipeline.project_name}</h3>
+                <p className="text-sm text-muted-foreground">
+                  {(pipeline.pipeline_type || pipeline.platform || "CI/CD").charAt(0).toUpperCase() +
+                    (pipeline.pipeline_type || pipeline.platform || "CI/CD").slice(1)}
+                </p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pb-3">
+            <p className="text-sm text-muted-foreground">
+              Created {new Date(pipeline.created_at).toLocaleDateString()}
+            </p>
           </CardContent>
+          <CardFooter className="flex justify-between">
+            <Button variant="outline" asChild>
+              <Link href={`/cicd/${pipeline.id}`}>View Details</Link>
+            </Button>
+            <DeleteButton id={pipeline.id} />
+          </CardFooter>
         </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {pipelines.map((pipeline) => (
-            <Card key={pipeline.id} className="flex flex-col">
-              <CardHeader>
-                <CardTitle className="truncate">{pipeline.name}</CardTitle>
-                <CardDescription>
-                  {pipeline.pipeline_type.charAt(0).toUpperCase() + pipeline.pipeline_type.slice(1)} Pipeline
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex-grow">
-                <div className="text-sm text-muted-foreground mb-2">
-                  Created: {new Date(pipeline.created_at).toLocaleDateString()}
-                </div>
-                <div className="bg-muted p-2 rounded-md h-24 overflow-hidden text-xs font-mono">
-                  {pipeline.pipeline_code.slice(0, 200)}
-                  {pipeline.pipeline_code.length > 200 && "..."}
-                </div>
-              </CardContent>
-              <CardFooter className="flex justify-between">
-                <Link href={`/cicd/${pipeline.id}`}>
-                  <Button variant="outline" size="sm" className="gap-1">
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    View
-                  </Button>
-                </Link>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1"
-                    onClick={() => {
-                      const blob = new Blob([pipeline.pipeline_code], { type: "text/plain" })
-                      const url = URL.createObjectURL(blob)
-                      const a = document.createElement("a")
-                      a.href = url
-                      a.download = `${pipeline.name.replace(/\s+/g, "-").toLowerCase()}.yml`
-                      document.body.appendChild(a)
-                      a.click()
-                      document.body.removeChild(a)
-                      URL.revokeObjectURL(url)
-                    }}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    Download
-                  </Button>
-                  <DeletePipelineButton id={pipeline.id} />
-                </div>
-              </CardFooter>
-            </Card>
-          ))}
-        </div>
-      )}
+      ))}
     </div>
   )
 }

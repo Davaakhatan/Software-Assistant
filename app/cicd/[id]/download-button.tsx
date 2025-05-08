@@ -2,32 +2,61 @@
 
 import { Button } from "@/components/ui/button"
 import { Download } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
+import { useState } from "react"
 
 export default function DownloadButton({ pipeline }) {
-  const handleDownload = () => {
-    const filename = `${pipeline.project_name || pipeline.name}-pipeline.yml`
-    const content = pipeline.pipeline_code || ""
+  const { toast } = useToast()
+  const [isDownloading, setIsDownloading] = useState(false)
 
-    // Create a blob with the content
-    const blob = new Blob([content], { type: "text/yaml" })
-    const url = URL.createObjectURL(blob)
+  const handleDownload = async () => {
+    try {
+      setIsDownloading(true)
 
-    // Create a temporary link and trigger download
-    const a = document.createElement("a")
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
+      // Get the pipeline code from either pipeline_code or generated_config
+      const pipelineCode = pipeline.pipeline_code || pipeline.generated_config || ""
 
-    // Clean up
-    URL.revokeObjectURL(url)
-    document.body.removeChild(a)
+      // Create a blob and download it
+      const blob = new Blob([pipelineCode], { type: "text/plain" })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+
+      // Use name or project_name for the filename
+      const filename = (pipeline.name || pipeline.project_name || "pipeline").replace(/\s+/g, "-").toLowerCase()
+
+      // Determine the file extension based on the pipeline type
+      let extension = ".yml"
+      if ((pipeline.pipeline_type || pipeline.platform || "").toLowerCase().includes("jenkins")) {
+        extension = ".jenkinsfile"
+      }
+
+      a.download = `${filename}${extension}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      toast({
+        title: "Pipeline downloaded",
+        description: "The pipeline configuration has been downloaded successfully.",
+      })
+    } catch (error) {
+      console.error("Error downloading pipeline:", error)
+      toast({
+        variant: "destructive",
+        title: "Download failed",
+        description: "There was an error downloading the pipeline configuration.",
+      })
+    } finally {
+      setIsDownloading(false)
+    }
   }
 
   return (
-    <Button onClick={handleDownload} className="gap-2">
+    <Button variant="outline" onClick={handleDownload} disabled={isDownloading} className="gap-2">
       <Download className="h-4 w-4" />
-      Download
+      {isDownloading ? "Downloading..." : "Download"}
     </Button>
   )
 }
