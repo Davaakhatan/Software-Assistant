@@ -5,6 +5,9 @@ export async function GET() {
   try {
     const supabase = getSupabaseServer()
 
+    // Add more detailed logging for debugging in production
+    console.log("Fetching specifications from Supabase")
+
     const { data, error } = await supabase.from("specifications").select("*").order("created_at", { ascending: false })
 
     if (error) {
@@ -12,6 +15,7 @@ export async function GET() {
       return NextResponse.json({ error: "Failed to fetch specifications" }, { status: 500 })
     }
 
+    console.log(`Successfully fetched ${data?.length || 0} specifications`)
     return NextResponse.json(data || [])
   } catch (error) {
     console.error("Error in specifications API:", error)

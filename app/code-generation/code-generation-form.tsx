@@ -34,13 +34,16 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
   // Update filtered designs when specification changes
   const handleSpecificationChange = (id: string) => {
     setSpecId(id)
+    console.log("Selected specification ID:", id)
+
     if (id) {
+      console.log("Filtering designs for specification:", id)
       const relatedDesigns = designs.filter((design) => {
         // Check if the design is related to this specification
-        // This depends on your data structure - adjust as needed
         const requirement = design.requirements
         return requirement && requirement.specification_id === id
       })
+      console.log(`Found ${relatedDesigns.length} related designs`)
       setFilteredDesigns(relatedDesigns)
       setDesignId("") // Reset design selection
     } else {
@@ -70,12 +73,28 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
 
     setIsGenerating(true)
     try {
+      console.log("Starting code generation with:", {
+        activeTab,
+        specId,
+        designId,
+        language,
+        framework,
+        manualRequirements: manualRequirements ? "provided" : "not provided",
+      })
+
       let result
       if (activeTab === "fromSpecDesign") {
         result = await generateFromSpecificationAndDesign(specId, designId, language, framework)
       } else {
         result = await generateCode(language, framework, manualRequirements)
       }
+
+      console.log("Generation result:", {
+        success: result.success,
+        hasCode: !!result.code,
+        hasFallback: !!result.fallbackCode,
+        error: result.error,
+      })
 
       if (result.success) {
         setGeneratedCode(result.code)
@@ -109,6 +128,9 @@ export default function CodeGenerationForm({ specifications, designs }: CodeGene
       }
     } catch (error) {
       console.error("Error generating code:", error)
+      setGeneratedCode(
+        "// Error occurred during code generation\n// " + (error instanceof Error ? error.message : String(error)),
+      )
       toast({
         title: "Error",
         description: "An unexpected error occurred",

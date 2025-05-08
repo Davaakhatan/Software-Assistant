@@ -3,25 +3,54 @@ import CodeGenerationForm from "./code-generation-form"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Code } from "lucide-react"
+import { Code, AlertTriangle } from "lucide-react"
 
 export default async function CodeGenerationPage() {
   const supabase = getSupabaseServer()
 
-  // Fetch specifications
-  const { data: specifications } = await supabase
+  // Fetch specifications with error handling
+  const { data: specifications, error: specError } = await supabase
     .from("specifications")
     .select("id, app_name")
     .order("created_at", { ascending: false })
 
-  // Fetch designs
-  const { data: designs } = await supabase
+  // Fetch designs with error handling
+  const { data: designs, error: designError } = await supabase
     .from("designs")
     .select("id, type, requirement_id, requirements(specification_id)")
+
+  // Log for debugging
+  console.log(`Fetched ${specifications?.length || 0} specifications and ${designs?.length || 0} designs`)
+
+  if (specError) {
+    console.error("Error fetching specifications:", specError)
+  }
+
+  if (designError) {
+    console.error("Error fetching designs:", designError)
+  }
 
   return (
     <div className="container mx-auto py-6">
       <h1 className="text-2xl font-bold mb-6">Code Generation</h1>
+
+      {specError && (
+        <Card className="mb-6 border-red-200 bg-red-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-red-700 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              Error Loading Specifications
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-red-700">
+              There was an error loading your specifications. Please try refreshing the page.
+            </p>
+            <p className="text-sm text-red-500 mt-2">{specError.message}</p>
+          </CardContent>
+        </Card>
+      )}
+
       <CodeGenerationForm specifications={specifications || []} designs={designs || []} />
 
       {/* Tips and Next Steps */}

@@ -105,6 +105,13 @@ export async function generateFromSpecificationAndDesign(
   language: string,
   framework: string,
 ) {
+  console.log("Starting code generation from specification and design:", {
+    specificationId,
+    designId,
+    language,
+    framework,
+  })
+
   try {
     const supabase = getSupabaseServer()
 
@@ -115,10 +122,18 @@ export async function generateFromSpecificationAndDesign(
       .eq("id", specificationId)
       .single()
 
+    // Add more detailed error handling and logging
     if (specError) {
       console.error("Error fetching specification:", specError)
-      return { success: false, error: "Failed to fetch specification" }
+      return {
+        success: false,
+        error: `Failed to fetch specification: ${specError.message}`,
+        fallbackCode: generateFallbackCode(language, framework, "Unknown Application"),
+      }
     }
+
+    // Add more logging
+    console.log(`Successfully fetched specification: ${specification?.app_name || "Unknown"}`)
 
     // Fetch design - make this optional
     let design = null
@@ -257,13 +272,54 @@ main();`
       }
     }
   } catch (error) {
-    console.error("Error generating code from specification and design:", error)
+    console.error("Error in generateFromSpecificationAndDesign:", error)
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to generate code. Please try again.",
-      fallbackCode: `// Error occurred while generating code
-console.log("An error occurred during code generation");`,
+      error: error instanceof Error ? error.message : "An unexpected error occurred",
+      fallbackCode: generateFallbackCode(language, framework, "Error Application"),
     }
+  }
+}
+
+// Add a helper function to generate fallback code
+function generateFallbackCode(language, framework, appName) {
+  if (language === "typescript" && framework === "nextjs") {
+    return `// Fallback Next.js component for ${appName}
+"use client"
+    
+import { useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+
+export default function ${appName.replace(/\s+/g, "")}Component() {
+  const [count, setCount] = useState(0)
+  
+  return (
+    <Card className="w-full max-w-md mx-auto">
+      <CardHeader>
+        <CardTitle>${appName}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col items-center gap-4">
+          <p>Count: {count}</p>
+          <Button onClick={() => setCount(prev => prev + 1)}>
+            Increment
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}`
+  } else {
+    return `// Fallback code for ${appName} using ${framework} and ${language}
+console.log("Hello from ${appName}!");
+
+// This is a placeholder implementation
+function main() {
+  return "Welcome to ${appName}";
+}
+
+main();`
   }
 }
 
