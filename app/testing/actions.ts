@@ -1,9 +1,284 @@
 "use server"
-import { getSupabaseAdmin } from "@/lib/supabase-admin"
-import { generateAIText } from "@/lib/ai-service"
-import { revalidatePath } from "next/cache"
 
-// Add the missing function
+import { getSupabaseAdmin } from "@/lib/supabase-admin"
+import { revalidatePath } from "next/cache"
+import { getSupabase } from "@/lib/supabase"
+import { generateText } from "ai"
+import { openai } from "@ai-sdk/openai"
+
+// Existing functions...
+
+export async function analyzeUploadedCode({ fileUrl, fileName }) {
+  try {
+    console.log(`Analyzing uploaded code from ${fileUrl}`)
+
+    // Get the file content
+    const response = await fetch(fileUrl)
+    if (!response.ok) {
+      throw new Error(`Failed to fetch file: ${response.statusText}`)
+    }
+
+    const codeContent = await response.text()
+
+    // Extract component name from filename
+    const baseFileName = fileName.split(".")[0]
+    let componentName = baseFileName
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("")
+
+    // If the file is too large, truncate it for analysis
+    const truncatedContent =
+      codeContent.length > 10000 ? codeContent.substring(0, 10000) + "...[truncated]" : codeContent
+
+    // Use AI to analyze the code if OPENAI_API_KEY is available
+    let description = `Component from file ${fileName}`
+    let suggestedTestCases = []
+
+    try {
+      const prompt = `
+        Analyze this code and provide:
+        1. A brief description of what this component/module does
+        2. 3-5 test cases that would be appropriate for testing it
+        3. The main component or function name that should be tested
+
+        Code:
+        \`\`\`
+        ${truncatedContent}
+        \`\`\`
+
+        Respond in JSON format with the following structure:
+        {
+          "componentName": "string",
+          "description": "string",
+          "testCases": [
+            { "description": "string", "expectation": "string" }
+          ]
+        }
+      `
+
+      const { text } = await generateText({
+        model: openai("gpt-3.5-turbo"),
+        prompt,
+        temperature: 0.3,
+        maxTokens: 1000,
+      })
+
+      try {
+        const analysis = JSON.parse(text)
+
+        if (analysis.componentName) {
+          componentName = analysis.componentName
+        }
+
+        if (analysis.description) {
+          description = analysis.description
+        }
+
+        if (Array.isArray(analysis.testCases)) {
+          suggestedTestCases = analysis.testCases
+        }
+      } catch (parseError) {
+        console.error("Error parsing AI response:", parseError)
+        // Continue with default values
+      }
+    } catch (aiError) {
+      console.error("Error using AI to analyze code:", aiError)
+      // Continue with default values
+    }
+
+    return {
+      success: true,
+      componentName,
+      description,
+      codeContent,
+      suggestedTestCases:
+        suggestedTestCases.length > 0
+          ? suggestedTestCases
+          : [
+              { description: "should render correctly", expectation: "component renders without errors" },
+              { description: 'should handle props correctly", expectation": "component uses props as expected' },
+            ],
+    }
+  } catch (error) {
+    console.error("Error analyzing uploaded code:", error)
+    return {
+      success: false,
+      error: error.message || "Failed to analyze the uploaded code",
+    }
+  }
+}
+
+// Add this to your existing saveTestCases function
+export async function saveTestCases(params: {
+  testType: string
+  framework: string
+  componentToTest: string
+  testCases: Array<{ description: string; expectation: string }>
+  generatedTests: string
+  specificationId: string
+  designId: string | null
+  generatedCodeId: string | null
+  name: string
+  uploadedFileUrl?: string | null
+  uploadedFileName?: string | null
+}) {
+  try {
+    const supabase = getSupabase()
+
+    // Insert the test case into the database
+    const { data, error } = await supabase
+      .from("test_cases")
+      .insert({
+        name: params.name,
+        test_type: params.testType,
+        framework: params.framework,
+        component_name: params.componentToTest,
+        test_cases: params.testCases,
+        generated_tests: params.generatedTests,
+        specification_id: params.specificationId,
+        design_id: params.designId,
+        generated_code_id: params.generatedCodeId,
+        uploaded_file_url: params.uploadedFileUrl || null,
+        uploaded_file_name: params.uploadedFileName || null,
+      })
+      .select()
+
+    if (error) {
+      console.error("Error saving test cases:", error)
+      return {
+        success: false,
+        error: error.message,
+      }
+    }
+
+    return {
+      success: true,
+      data: data[0],
+    }
+  } catch (error) {
+    console.error("Error in saveTestCases:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to save test cases",
+    }
+  }
+}
+
+// Add this to your existing generateAITestCases function
+export async function generateAITestCases(params: {
+  testType: string
+  framework: string
+  componentToTest: string
+  componentDescription: string
+  specificationData: any
+  designData: any
+  generatedCodeData: any
+  uploadedFileUrl?: string
+  uploadedFileName?: string
+  uploadedCodeContent?: string
+}) {
+  try {
+    // Prepare the prompt based on the available information
+    let prompt = `Generate ${params.testType} tests for a ${params.framework} project for the component "${params.componentToTest}".`
+
+    if (params.componentDescription) {
+      prompt += `\n\nComponent description: ${params.componentDescription}`
+    }
+
+    if (params.uploadedCodeContent) {
+      prompt += `\n\nHere is the actual code of the component:\n\`\`\`\n${params.uploadedCodeContent}\n\`\`\``
+    }
+
+    if (params.specificationData) {
+      prompt += `\n\nApplication specification: ${JSON.stringify(params.specificationData, null, 2)}`
+    }
+
+    if (params.designData) {
+      prompt += `\n\nDesign information: ${JSON.stringify(params.designData, null, 2)}`
+    }
+
+    prompt += `\n\nPlease generate:
+    1. A list of test cases in JSON format with "description" and "expectation" fields
+    2. The complete test code using ${params.framework}
+    
+    Format your response as a JSON object with fields: testCases and testCode.`
+
+    // Use OpenAI to generate tests
+    const { text } = await generateText({
+      model: openai("gpt-4o"),
+      prompt,
+      temperature: 0.2,
+      maxTokens: 2500,
+    })
+
+    // Parse the AI response
+    let aiResponse
+    try {
+      // Extract JSON from the response (it might be wrapped in markdown code blocks)
+      const jsonMatch =
+        text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```\n([\s\S]*?)\n```/) || text.match(/{[\s\S]*?}/)
+
+      if (jsonMatch) {
+        aiResponse = JSON.parse(jsonMatch[1] || jsonMatch[0])
+      } else {
+        // If no JSON format is found, try to extract structured data from the text
+        const testCodeMatch = text.match(/```(?:javascript|typescript|jsx|tsx)?\n([\s\S]*?)\n```/)
+
+        aiResponse = {
+          testCases: [
+            { description: "should render correctly", expectation: "component renders without errors" },
+            { description: "should handle user interactions", expectation: "component responds to user actions" },
+          ],
+          testCode: testCodeMatch ? testCodeMatch[1] : text,
+        }
+      }
+    } catch (parseError) {
+      console.error("Error parsing AI response:", parseError)
+
+      // Create a fallback response
+      const testCode = `// Generated ${params.testType} tests for ${params.componentToTest} using ${params.framework}
+
+import { render, screen } from '@testing-library/react';
+import ${params.componentToTest} from './${params.componentToTest}';
+
+describe('${params.componentToTest}', () => {
+  test('should render correctly', () => {
+    render(<${params.componentToTest} />);
+    // Add your assertions here
+  });
+  
+  test('should handle user interactions', () => {
+    render(<${params.componentToTest} />);
+    // Add your interaction tests here
+  });
+});`
+
+      aiResponse = {
+        testCases: [
+          { description: "should render correctly", expectation: "component renders without errors" },
+          { description: "should handle user interactions", expectation: "component responds to user actions" },
+        ],
+        testCode,
+      }
+    }
+
+    return {
+      success: true,
+      testCases: aiResponse.testCases,
+      testCode: aiResponse.testCode,
+    }
+  } catch (error) {
+    console.error("Error generating AI test cases:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to generate AI test cases",
+    }
+  }
+}
+
+// Add any other existing functions here...
+// The rest of the file remains the same...
 export async function getGeneratedCodeById(id) {
   try {
     console.log(`Getting generated code with ID: ${id}`)
@@ -21,113 +296,6 @@ export async function getGeneratedCodeById(id) {
     return { success: true, data }
   } catch (error) {
     console.error("Error in getGeneratedCodeById:", error)
-    return { success: false, error: error.message }
-  }
-}
-
-// Other functions remain the same...
-
-export async function saveTestCases({
-  testType,
-  framework,
-  componentToTest,
-  testCases,
-  generatedTests,
-  specificationId,
-  designId = null,
-  generatedCodeId = null,
-  name = "Generated Tests",
-}) {
-  try {
-    console.log("Saving test cases with:", {
-      testType,
-      framework,
-      componentToTest,
-      testCasesCount: testCases?.length,
-      specificationId,
-      designId,
-      generatedCodeId,
-      name,
-    })
-
-    // Use the admin client to bypass RLS
-    const supabase = getSupabaseAdmin()
-
-    // First, ensure the table exists with all required columns
-    await ensureTestCasesTable(supabase)
-
-    // Create a data object that matches the actual table schema
-    // Only include fields we know exist in the table
-    const testCaseData = {
-      name: name,
-      test_type: testType,
-      framework: framework,
-      component_to_test: componentToTest,
-      generated_tests: JSON.stringify({
-        cases: testCases,
-        generatedCode: generatedTests,
-        // Store related IDs in the JSON if the columns don't exist
-        specification_id: specificationId,
-        design_id: designId,
-        generated_code_id: generatedCodeId,
-      }),
-      // Only include these if we've confirmed the columns exist
-      ...(specificationId ? { specification_id: specificationId } : {}),
-    }
-
-    // Save the test cases
-    const { data, error } = await supabase.from("test_cases").insert([testCaseData]).select()
-
-    if (error) {
-      console.error("Error saving test cases:", error)
-
-      // If the error is about missing columns, try a simplified version
-      if (error.message.includes("column") && error.message.includes("does not exist")) {
-        console.log("Trying simplified insert without problematic columns...")
-
-        // Create a simplified data object without the problematic columns
-        const simplifiedData = {
-          name: name,
-          test_type: testType,
-          framework: framework,
-          component_to_test: componentToTest,
-          generated_tests: JSON.stringify({
-            cases: testCases,
-            generatedCode: generatedTests,
-            specification_id: specificationId,
-            design_id: designId,
-            generated_code_id: generatedCodeId,
-          }),
-        }
-
-        // Try the insert again with simplified data
-        const { data: simplifiedResult, error: simplifiedError } = await supabase
-          .from("test_cases")
-          .insert([simplifiedData])
-          .select()
-
-        if (simplifiedError) {
-          console.error("Error with simplified insert:", simplifiedError)
-          return { success: false, error: simplifiedError.message }
-        }
-
-        // Revalidate paths
-        revalidatePath("/testing")
-        revalidatePath("/testing/saved")
-
-        return { success: true, data: simplifiedResult[0] }
-      }
-
-      return { success: false, error: error.message }
-    }
-
-    // Revalidate paths
-    revalidatePath("/testing")
-    revalidatePath("/testing/saved")
-
-    return { success: true, data: data[0] }
-  } catch (error) {
-    console.error("Error in saveTestCases:", error)
     return { success: false, error: error.message }
   }
 }
@@ -209,8 +377,6 @@ async function checkIfColumnExists(supabase, tableName, columnName) {
   }
 }
 
-// Rest of the file remains the same...
-
 export async function getTestCases() {
   try {
     console.log("Getting test cases from Supabase...")
@@ -261,6 +427,8 @@ export async function getTestCases() {
         specification_id: testCase.specification_id || generatedTests.specification_id,
         design_id: testCase.design_id || generatedTests.design_id,
         generated_code_id: testCase.generated_code_id || generatedTests.generated_code_id,
+        uploaded_file_url: generatedTests.uploaded_file_url || null,
+        uploaded_file_name: generatedTests.uploaded_file_name || null,
       }
     })
 
@@ -370,6 +538,8 @@ export async function getTestCasesById(id) {
       specification_id: testCase.specification_id || generatedTests.specification_id,
       design_id: testCase.design_id || generatedTests.design_id,
       generated_code_id: testCase.generated_code_id || generatedTests.generated_code_id,
+      uploaded_file_url: generatedTests.uploaded_file_url || null,
+      uploaded_file_name: generatedTests.uploaded_file_name || null,
     }
 
     // Get specification data if available
@@ -438,197 +608,6 @@ export async function getTestCasesById(id) {
   } catch (error) {
     console.error("Error in getTestCasesById:", error)
     return { success: false, error: error.message }
-  }
-}
-
-export async function generateAITestCases({
-  testType,
-  framework,
-  componentToTest,
-  componentDescription,
-  specificationData,
-  designData,
-  generatedCodeData,
-}) {
-  try {
-    console.log("Generating AI test cases with:", {
-      testType,
-      framework,
-      componentToTest,
-      hasSpecData: !!specificationData,
-      hasDesignData: !!designData,
-      hasCodeData: !!generatedCodeData,
-    })
-
-    // Create a prompt for the AI to generate test cases
-    let prompt = `
-Generate comprehensive ${testType} tests for a React component named "${componentToTest}" using the ${framework} testing framework.
-
-${componentDescription ? `Component description: ${componentDescription}` : ""}
-`
-
-    // Add specification data if available
-    if (specificationData) {
-      prompt += `
-Application specification:
-- Name: ${specificationData.app_name || "N/A"}
-- Type: ${specificationData.app_type || "N/A"}
-- Description: ${specificationData.app_description || "N/A"}
-${
-  specificationData.functional_requirements
-    ? `- Functional Requirements: ${specificationData.functional_requirements.substring(0, 500)}...`
-    : ""
-}
-`
-    }
-
-    // Add design data if available
-    if (designData) {
-      prompt += `
-Design information:
-- Type: ${designData.type || "N/A"}
-- Description: ${designData.description ? designData.description.substring(0, 300) + "..." : "N/A"}
-`
-    }
-
-    // Add generated code if available
-    if (generatedCodeData) {
-      prompt += `
-Generated code to test:
-\`\`\`${generatedCodeData.language}
-${generatedCodeData.generated_code ? generatedCodeData.generated_code.substring(0, 1000) + "..." : "N/A"}
-\`\`\`
-`
-    }
-
-    prompt += `
-Please generate:
-1. A list of test cases with descriptions and expected outcomes
-2. The complete test code implementation using ${framework} and React Testing Library
-
-Format the response as follows:
-
-TEST_CASES_START
-[
-  {
-    "description": "should render correctly",
-    "expectation": "component renders without errors"
-  },
-  // more test cases...
-]
-TEST_CASES_END
-
-TEST_CODE_START
-// Complete test code implementation here...
-TEST_CODE_END
-
-This format helps me parse your response correctly. Do not use backticks inside the JSON array of test cases.
-`
-
-    const systemPrompt = `
-You are an expert test engineer specializing in React testing. Your task is to generate comprehensive test cases and implementation code for React components.
-Follow best practices for ${framework} and React Testing Library.
-Include tests for rendering, user interactions, error states, and edge cases.
-Make sure the generated code is valid JavaScript/TypeScript that would work in a real project.
-If you're given generated code to test, analyze it carefully and create tests that verify its functionality.
-
-IMPORTANT: Format your response exactly as requested with TEST_CASES_START/END and TEST_CODE_START/END markers.
-The test cases must be valid JSON. Do not use backticks inside the JSON array.
-`
-
-    // Generate test cases using AI
-    const result = await generateAIText(prompt, systemPrompt, {
-      temperature: 0.7,
-      maxTokens: 2500,
-      timeoutMs: 30000,
-    })
-
-    if (!result.success) {
-      throw new Error(result.error || "Failed to generate tests with AI")
-    }
-
-    // Parse the AI response using the markers
-    try {
-      const responseText = result.text || ""
-      console.log("AI response received, length:", responseText.length)
-
-      // Extract test cases using markers
-      let testCases = []
-      if (responseText.includes("TEST_CASES_START") && responseText.includes("TEST_CASES_END")) {
-        const testCasesJson = responseText.split("TEST_CASES_START")[1].split("TEST_CASES_END")[0].trim()
-
-        console.log("Extracted test cases JSON:", testCasesJson.substring(0, 100) + "...")
-
-        try {
-          testCases = JSON.parse(testCasesJson)
-        } catch (jsonError) {
-          console.error("Error parsing test cases JSON:", jsonError)
-          // Fallback to regex extraction of individual test cases
-          const testCaseRegex = /"description":\s*"([^"]+)",\s*"expectation":\s*"([^"]+)"/g
-          const matches = [...testCasesJson.matchAll(testCaseRegex)]
-          testCases = matches.map((match) => ({
-            description: match[1],
-            expectation: match[2],
-          }))
-
-          if (testCases.length === 0) {
-            // Last resort fallback
-            testCases = [
-              { description: "should render correctly", expectation: "component renders without errors" },
-              { description: "should handle user interactions", expectation: "component responds to user actions" },
-            ]
-          }
-        }
-      } else {
-        console.log("TEST_CASES markers not found, using fallback extraction")
-        // Fallback to default test cases
-        testCases = [
-          { description: "should render correctly", expectation: "component renders without errors" },
-          { description: "should handle user interactions", expectation: "component responds to user actions" },
-        ]
-      }
-
-      // Extract test code using markers
-      let testCode = ""
-      if (responseText.includes("TEST_CODE_START") && responseText.includes("TEST_CODE_END")) {
-        testCode = responseText.split("TEST_CODE_START")[1].split("TEST_CODE_END")[0].trim()
-      } else {
-        console.log("TEST_CODE markers not found, extracting code blocks")
-        // Try to extract code from code blocks
-        const codeBlockRegex = /```(?:javascript|typescript|jsx|tsx)?\n([\s\S]+?)```/g
-        const codeBlocks = [...responseText.matchAll(codeBlockRegex)]
-        if (codeBlocks.length > 0) {
-          testCode = codeBlocks[0][1]
-        } else {
-          // Last resort: just use the whole response as code
-          testCode = responseText
-        }
-      }
-
-      return {
-        success: true,
-        testCases,
-        testCode,
-      }
-    } catch (parseError) {
-      console.error("Error parsing AI response:", parseError)
-
-      // If we can't parse the response, return default test cases and the raw text as code
-      return {
-        success: true,
-        testCases: [
-          { description: "should render correctly", expectation: "component renders without errors" },
-          { description: "should handle user interactions", expectation: "component responds to user actions" },
-        ],
-        testCode: result.text || "",
-      }
-    }
-  } catch (error) {
-    console.error("Error generating AI test cases:", error)
-    return {
-      success: false,
-      error: error.message || "Failed to generate test cases",
-    }
   }
 }
 

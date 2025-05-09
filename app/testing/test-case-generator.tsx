@@ -7,15 +7,21 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Check, Download, Plus, RefreshCw, Save, Sparkles, TestTube, Trash, Wand2 } from "lucide-react"
+import { Check, Download, FileCode, Plus, RefreshCw, Save, Sparkles, TestTube, Trash, Wand2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { getSpecifications, getSpecificationById } from "../specification-generator/actions"
 import { getDesigns } from "../design/actions"
 import { getSupabase } from "@/lib/supabase"
-import { generateAITestCases, saveTestCases, getGeneratedCodeById } from "./actions"
+import { generateAITestCases, saveTestCases, getGeneratedCodeById, analyzeUploadedCode } from "./actions"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { getGeneratedCode } from "../code-generation/actions"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { checkAndCreateBucket } from "./storage-actions"
+import { ServerFileUpload } from "@/components/server-file-upload"
+
+// Bucket name for file uploads
+const STORAGE_BUCKET = "sdlc-files"
 
 export default function TestCaseGenerator() {
   const { toast } = useToast()
@@ -33,6 +39,8 @@ export default function TestCaseGenerator() {
   const [testName, setTestName] = useState("")
   const [useAI, setUseAI] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [bucketReady, setBucketReady] = useState(false)
+  const [isBucketLoading, setIsBucketLoading] = useState(true)
 
   // Added for integration with specifications and designs
   const [specificationsList, setSpecificationsList] = useState([])
@@ -49,6 +57,51 @@ export default function TestCaseGenerator() {
   const [selectedCodeId, setSelectedCodeId] = useState("")
   const [isLoadingCode, setIsLoadingCode] = useState(false)
   const [generatedCodeData, setGeneratedCodeData] = useState(null)
+
+  // New state for file upload
+  const [uploadedFileUrl, setUploadedFileUrl] = useState("")
+  const [uploadedFileName, setUploadedFileName] = useState("")
+  const [isAnalyzingFile, setIsAnalyzingFile] = useState(false)
+  const [fileLanguage, setFileLanguage] = useState("")
+  const [fileFramework, setFileFramework] = useState("")
+  const [uploadedCodeContent, setUploadedCodeContent] = useState("")
+  const [showUploadSection, setShowUploadSection] = useState(false)
+
+  // Check if the bucket exists and create it if it doesn't using server action
+  useEffect(() => {
+    async function setupBucket() {
+      setIsBucketLoading(true)
+      try {
+        // Call the server action to check and create the bucket
+        const result = await checkAndCreateBucket(STORAGE_BUCKET)
+
+        if (result.success) {
+          console.log(`Bucket ${STORAGE_BUCKET} is ready`)
+          setBucketReady(true)
+        } else {
+          console.error("Error setting up bucket:", result.error)
+          toast({
+            title: "Error setting up storage",
+            description: result.error || "Could not set up storage bucket. File uploads may not work.",
+            variant: "destructive",
+          })
+          setBucketReady(false)
+        }
+      } catch (error) {
+        console.error("Error in setupBucket:", error)
+        toast({
+          title: "Error setting up storage",
+          description: "An unexpected error occurred while setting up file storage.",
+          variant: "destructive",
+        })
+        setBucketReady(false)
+      } finally {
+        setIsBucketLoading(false)
+      }
+    }
+
+    setupBucket()
+  }, [toast])
 
   // Fetch specifications list on component mount
   useEffect(() => {
@@ -362,12 +415,101 @@ export default function TestCaseGenerator() {
     }
   }
 
-  // Update only the generateWithAI function:
+  // Handle file upload completion
+  const handleUploadComplete = async (url) => {
+    setUploadedFileUrl(url)
+
+    // Extract filename from URL
+    const filename = url.split("/").pop()
+    setUploadedFileName(filename)
+
+    // Determine language from file extension
+    const extension = filename.split(".").pop().toLowerCase()
+    let language = "javascript"
+    let framework = "react"
+
+    if (extension === "ts" || extension === "tsx") {
+      language = "typescript"
+    } else if (extension === "jsx") {
+      language = "javascript"
+    } else if (extension === "vue") {
+      language = "javascript"
+      framework = "vue"
+    } else if (extension === "svelte") {
+      language = "javascript"
+      framework = "svelte"
+    }
+
+    setFileLanguage(language)
+    setFileFramework(framework)
+
+    // Set test framework based on language
+    if (language === "typescript") {
+      setFramework("jest")
+    }
+
+    toast({
+      title: "File uploaded",
+      description: `${filename} has been uploaded successfully.`,
+    })
+
+    // Analyze the uploaded code
+    await handleCodeAnalysis(url, filename)
+  }
+
+  // Analyze the uploaded code
+  const handleCodeAnalysis = async (url, filename) => {
+    setIsAnalyzingFile(true)
+    try {
+      // Call the server action to analyze the code
+      const result = await analyzeUploadedCode({
+        fileUrl: url,
+        fileName: filename,
+      })
+
+      if (result.success) {
+        // Update state with the analyzed code information
+        setComponentToTest(result.componentName || filename.split(".")[0])
+        setComponentDescription(result.description || `Component from uploaded file ${filename}`)
+        setUploadedCodeContent(result.codeContent || "")
+
+        if (result.suggestedTestCases && result.suggestedTestCases.length > 0) {
+          setTestCases(result.suggestedTestCases)
+        }
+
+        toast({
+          title: "Code analyzed",
+          description: "Your code has been analyzed and test cases have been suggested.",
+        })
+
+        // Set test name based on the component name
+        setTestName(`${result.componentName || filename.split(".")[0]} Tests`)
+      } else {
+        console.error("Error analyzing code:", result.error)
+        toast({
+          title: "Error analyzing code",
+          description: result.error || "Failed to analyze the uploaded code.",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error in analyzeUploadedCode:", error)
+      toast({
+        title: "Error",
+        description: "Failed to analyze the uploaded code. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsAnalyzingFile(false)
+    }
+  }
+
+  // Generate test cases with AI
   const generateWithAI = async () => {
-    if (!componentToTest.trim()) {
+    if (!componentToTest.trim() && !uploadedFileUrl) {
       toast({
         title: "Component name required",
-        description: "Please provide a component name to generate tests.",
+        description: "Please provide a component name or upload a file to generate tests.",
         variant: "destructive",
       })
       return
@@ -386,6 +528,9 @@ export default function TestCaseGenerator() {
         specificationData,
         designData,
         generatedCodeData,
+        uploadedFileUrl,
+        uploadedFileName,
+        uploadedCodeContent,
       })
 
       if (!result.success) {
@@ -881,6 +1026,8 @@ describe('${componentToTest.split("/").pop()}', () => {
         designId: selectedDesignId || null,
         generatedCodeId: selectedCodeId || null,
         name: testName,
+        uploadedFileUrl: uploadedFileUrl || null,
+        uploadedFileName: uploadedFileName || null,
       })
 
       if (result.success) {
@@ -995,6 +1142,67 @@ describe('${componentToTest.split("/").pop()}', () => {
                   <Sparkles className="h-4 w-4 text-yellow-500" />
                   Use AI to generate tests
                 </Label>
+              </div>
+
+              {/* New Upload Code Section */}
+              <div className="space-y-4 border-t pt-4">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-medium">Upload Code to Test</Label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowUploadSection(!showUploadSection)}
+                    className="gap-2"
+                  >
+                    {showUploadSection ? "Hide" : "Show"} Upload Section
+                    <FileCode className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {showUploadSection && (
+                  <div className="space-y-4 p-4 border rounded-md">
+                    <div className="space-y-2">
+                      <Label>Upload your code file</Label>
+                      <div className="flex flex-col gap-4">
+                        {isBucketLoading ? (
+                          <div className="flex items-center justify-center p-4">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mr-2"></div>
+                            <span>Preparing storage...</span>
+                          </div>
+                        ) : bucketReady ? (
+                          <ServerFileUpload
+                            bucket={STORAGE_BUCKET}
+                            path="code-uploads"
+                            onUploadComplete={handleUploadComplete}
+                          />
+                        ) : (
+                          <Alert variant="destructive">
+                            <AlertTitle>Storage not available</AlertTitle>
+                            <AlertDescription>
+                              Could not set up storage for file uploads. Please try again later or contact an
+                              administrator.
+                            </AlertDescription>
+                          </Alert>
+                        )}
+
+                        {isAnalyzingFile && (
+                          <div className="flex items-center justify-center p-4">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mr-2"></div>
+                            <span>Analyzing file...</span>
+                          </div>
+                        )}
+
+                        {uploadedFileUrl && (
+                          <Alert className="mt-4">
+                            <FileCode className="h-4 w-4" />
+                            <AlertTitle>File uploaded successfully</AlertTitle>
+                            <AlertDescription>{uploadedFileName} has been uploaded and analyzed.</AlertDescription>
+                          </Alert>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-4">
@@ -1201,8 +1409,11 @@ describe('${componentToTest.split("/").pop()}', () => {
               <Button
                 onClick={handleGenerate}
                 disabled={
-                  (!componentToTest.trim() && !selectedSpecificationId) ||
-                  (!useAI && testCases.some((tc) => !tc.description.trim()) && !selectedSpecificationId) ||
+                  (!componentToTest.trim() && !selectedSpecificationId && !uploadedFileUrl) ||
+                  (!useAI &&
+                    testCases.some((tc) => !tc.description.trim()) &&
+                    !selectedSpecificationId &&
+                    !uploadedFileUrl) ||
                   isGenerating
                 }
                 className="gap-2"
