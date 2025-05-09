@@ -122,14 +122,23 @@ Please generate the following sections with clear headings:
 5. API Endpoints
 6. User Stories
 
+For the Database Schema section, please provide a detailed SQL-like schema that includes:
+- Table names with proper naming conventions
+- Column definitions with appropriate data types (INT, VARCHAR, TEXT, TIMESTAMP, etc.)
+- Primary keys and foreign keys clearly marked
+- Relationships between tables (one-to-many, many-to-many)
+- Any constraints or indexes that should be applied
+- Brief comments explaining the purpose of each table
+
 Format each section with Markdown headings (e.g., # Functional Requirements) and bullet points for clarity.`
 
       // Create a system prompt for the AI
-      const systemPrompt = `You are an expert software architect and requirements analyst.
+      const systemPrompt = `You are an expert software architect, requirements analyst, and database designer.
 Your task is to create a detailed software specification based on the provided information.
 Structure your response with clear sections using Markdown headings (# Section Title).
 Be specific, practical, and thorough in your specification.
-Always include all six requested sections, even if brief.`
+For database schemas, use SQL-like syntax with detailed table definitions including column names, data types, primary keys, foreign keys, and relationships.
+Always include all six requested sections, with particular attention to creating a comprehensive and detailed database schema.`
 
       // Generate the specification using AI
       const result = await generateAIText(prompt, systemPrompt, {
@@ -222,7 +231,11 @@ Always include all six requested sections, even if brief.`
             sections.non_functional_requirements += paragraph + "\n\n"
           } else if (/architecture|component|layer|tier|frontend|backend/i.test(paragraph)) {
             sections.system_architecture += paragraph + "\n\n"
-          } else if (/database|schema|table|entity|relation/i.test(paragraph)) {
+          } else if (
+            /database|schema|table|entity|relation|CREATE TABLE|PRIMARY KEY|FOREIGN KEY|REFERENCES|INT|VARCHAR|TEXT|TIMESTAMP|BOOLEAN/i.test(
+              paragraph,
+            )
+          ) {
             sections.database_schema += paragraph + "\n\n"
           } else if (/api|endpoint|route|get|post|put|delete/i.test(paragraph)) {
             sections.api_endpoints += paragraph + "\n\n"
@@ -253,6 +266,17 @@ Always include all six requested sections, even if brief.`
         functional_requirements: text,
       }
     }
+  }
+
+  // Helper function to format database schema with syntax highlighting
+  const formatDatabaseSchema = (schema: string) => {
+    // If the schema contains SQL-like syntax, format it with proper indentation and highlighting
+    if (/CREATE TABLE|PRIMARY KEY|FOREIGN KEY|REFERENCES/i.test(schema)) {
+      return schema
+    }
+
+    // Otherwise, return the original schema
+    return schema
   }
 
   const handleSave = async () => {
@@ -705,6 +729,7 @@ Always include all six requested sections, even if brief.`
                                 })
                               }
                               className="mt-1 h-72 font-mono text-sm"
+                              spellCheck="false"
                             />
                             <div className="absolute top-2 right-2">
                               <Button

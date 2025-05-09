@@ -17,7 +17,7 @@ import { generateDataModelDiagram } from "@/lib/openai-direct"
 export default function DataModel() {
   const { toast } = useToast()
   const { provider, temperature } = useAIProvider()
-const [diagramCode, setDiagramCode] = useState(`classDiagram
+  const [diagramCode, setDiagramCode] = useState(`classDiagram
 class Users {
   id       : int    (PK)
   name     : string
@@ -230,6 +230,181 @@ Users "1" -- "0..*" DetectedObjects
     return newLines.join("\n")
   }
 
+  // New function to parse SQL schema into Mermaid class diagram
+  const parseSQLSchemaToMermaid = (schema) => {
+    if (!schema) return ""
+
+    // Check if the schema contains SQL-like syntax
+    if (!/CREATE TABLE|PRIMARY KEY|FOREIGN KEY|REFERENCES/i.test(schema)) {
+      return schema // Return as is if it's not SQL-like
+    }
+
+    // Initialize the Mermaid diagram
+    let mermaidCode = "classDiagram\n"
+
+    // Track tables and their columns
+    const tables = {}
+
+    // Track relationships
+    const relationships = []
+
+    // Regular expressions for parsing
+    const tableRegex = /CREATE TABLE\s+(\w+)\s*\(/gi
+    const columnRegex =
+      /\s*(\w+)\s+([\w()]+)(?:\s+(?:NOT NULL|NULL|DEFAULT|AUTO_INCREMENT|UNIQUE|PRIMARY KEY|REFERENCES))*[,)]/gi
+    const primaryKeyRegex = /PRIMARY KEY\s*$$([^)]+)$$/gi
+    const foreignKeyRegex = /FOREIGN KEY\s*$$(\w+)$$\s*REFERENCES\s*(\w+)\s*$$(\w+)$$/gi
+
+    // Find all tables
+    let tableMatch
+    let currentTable = null
+    const lines = schema.split("\n")
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim()
+
+      // Skip empty lines and comments
+      if (!line || line.startsWith("#") || line.startsWith("--")) continue
+
+      // Check for table definition
+      if (line.toUpperCase().includes("CREATE TABLE")) {
+        tableRegex.lastIndex = 0
+        tableMatch = tableRegex.exec(line)
+        if (tableMatch) {
+          currentTable = tableMatch[1]
+          tables[currentTable] = {
+            columns: [],
+            primaryKeys: [],
+            foreignKeys: {},
+          }
+        }
+      }
+
+      // Check for column definitions
+      if (currentTable && !line.toUpperCase().includes("CREATE TABLE")) {
+        // Extract column name and type
+        columnRegex.lastIndex = 0
+        const columnMatch = columnRegex.exec(line)
+        if (columnMatch) {
+          const columnName = columnMatch[1]
+          const columnType = columnMatch[2]
+          const isPrimary = line.toUpperCase().includes("PRIMARY KEY")
+          const isForeign = line.toUpperCase().includes("REFERENCES")
+
+          tables[currentTable].columns.push({
+            name: columnName,
+            type: columnType,
+            isPrimary,
+            isForeign,
+          })
+
+          if (isPrimary) {
+            tables[currentTable].primaryKeys.push(columnName)
+          }
+
+          // Check for foreign key in the same line
+          if (isForeign) {
+            const refMatch = line.match(/REFERENCES\s+(\w+)\s*$$(\w+)$$/i)
+            if (refMatch) {
+              const referencedTable = refMatch[1]
+              const referencedColumn = refMatch[2]
+              tables[currentTable].foreignKeys[columnName] = {
+                table: referencedTable,
+                column: referencedColumn,
+              }
+
+              // Add relationship
+              relationships.push({
+                from: currentTable,
+                to: referencedTable,
+                fromColumn: columnName,
+                toColumn: referencedColumn,
+              })
+            }
+          }
+        }
+
+        // Check for separate primary key definition
+        primaryKeyRegex.lastIndex = 0
+        const pkMatch = primaryKeyRegex.exec(line)
+        if (pkMatch) {
+          const keys = pkMatch[1].split(",").map((k) => k.trim())
+          tables[currentTable].primaryKeys.push(...keys)
+
+          // Mark these columns as primary keys
+          tables[currentTable].columns.forEach((col) => {
+            if (keys.includes(col.name)) {
+              col.isPrimary = true
+            }
+          })
+        }
+
+        // Check for separate foreign key definition
+        foreignKeyRegex.lastIndex = 0
+        const fkMatch = foreignKeyRegex.exec(line)
+        if (fkMatch) {
+          const columnName = fkMatch[1]
+          const referencedTable = fkMatch[2]
+          const referencedColumn = fkMatch[3]
+
+          tables[currentTable].foreignKeys[columnName] = {
+            table: referencedTable,
+            column: referencedColumn,
+          }
+
+          // Mark this column as a foreign key
+          tables[currentTable].columns.forEach((col) => {
+            if (col.name === columnName) {
+              col.isForeign = true
+            }
+          })
+
+          // Add relationship
+          relationships.push({
+            from: currentTable,
+            to: referencedTable,
+            fromColumn: columnName,
+            toColumn: referencedColumn,
+          })
+        }
+      }
+
+      // Check if we're at the end of a table definition
+      if (currentTable && line.includes(");")) {
+        currentTable = null
+      }
+    }
+
+    // Generate Mermaid class definitions
+    for (const tableName in tables) {
+      mermaidCode += `  class ${tableName}\n`
+
+      // Add columns
+      tables[tableName].columns.forEach((column) => {
+        let columnDef = `  ${tableName} : ${column.name} ${column.type}`
+
+        // Add PK/FK indicators
+        if (column.isPrimary) {
+          columnDef += " (PK)"
+        } else if (column.isForeign) {
+          columnDef += " (FK)"
+        }
+
+        mermaidCode += columnDef + "\n"
+      })
+
+      mermaidCode += "\n"
+    }
+
+    // Generate relationships
+    relationships.forEach((rel) => {
+      // Determine cardinality (simplified)
+      mermaidCode += `  ${rel.from} "1" -- "many" ${rel.to} : references\n`
+    })
+
+    return mermaidCode
+  }
+
   const generateFromSpecification = async () => {
     if (!specificationId) {
       toast({
@@ -264,7 +439,26 @@ Users "1" -- "0..*" DetectedObjects
 
       const specData = result.data
 
-      // Use the direct OpenAI implementation
+      // First, try to parse the database schema directly if it's in SQL format
+      if (
+        specData.database_schema &&
+        /CREATE TABLE|PRIMARY KEY|FOREIGN KEY|REFERENCES/i.test(specData.database_schema)
+      ) {
+        console.log("Detected SQL schema, parsing directly")
+        const parsedDiagram = parseSQLSchemaToMermaid(specData.database_schema)
+        if (parsedDiagram && parsedDiagram.trim() !== "classDiagram") {
+          setDiagramCode(parsedDiagram)
+          toast({
+            title: "Data model generated",
+            description: "Data model has been generated from SQL schema.",
+          })
+          setIsGenerating(false)
+          return
+        }
+      }
+
+      // If direct parsing fails or schema is not in SQL format, use the AI
+      console.log("Using AI to generate diagram")
       const directResult = await generateDataModelDiagram(
         specData.app_name || "Unknown",
         specData.app_type || "web",
