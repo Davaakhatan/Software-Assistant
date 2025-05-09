@@ -986,10 +986,10 @@ describe('${componentToTest.split("/").pop()}', () => {
   }
 
   const handleSaveTests = async () => {
-    if (!selectedSpecificationId) {
+    if (!selectedSpecificationId && !uploadedFileUrl) {
       toast({
         title: "Error",
-        description: "Please select a specification to save the tests.",
+        description: "Please select a specification or upload a file to save the tests.",
         variant: "destructive",
       })
       return
@@ -1015,14 +1015,24 @@ describe('${componentToTest.split("/").pop()}', () => {
 
     setIsSaving(true)
     try {
+      // Create a JSON object to store all the data
+      const testData = {
+        testCases: testCases,
+        testCode: generatedTests,
+        designId: selectedDesignId || null,
+        generatedCodeId: selectedCodeId || null,
+        uploadedFileUrl: uploadedFileUrl || null,
+        uploadedFileName: uploadedFileName || null,
+      }
+
       // Use a minimal set of fields for saving
       const result = await saveTestCases({
         testType,
         framework,
         componentToTest,
         testCases,
-        generatedTests,
-        specificationId: selectedSpecificationId,
+        generatedTests: JSON.stringify(testData),
+        specificationId: selectedSpecificationId || null,
         designId: selectedDesignId || null,
         generatedCodeId: selectedCodeId || null,
         name: testName,
@@ -1044,6 +1054,7 @@ describe('${componentToTest.split("/").pop()}', () => {
           console.warn("Could not save to localStorage:", storageError)
         }
       } else {
+        console.error("Error saving tests:", result.error)
         // If saving to the database fails, store in localStorage as a fallback
         try {
           const fallbackId = `local-${Date.now()}`
@@ -1477,7 +1488,7 @@ describe('${componentToTest.split("/").pop()}', () => {
                   <Button
                     variant="outline"
                     onClick={handleSaveTests}
-                    disabled={isSaving || !selectedSpecificationId || !testName.trim()}
+                    disabled={isSaving || (!selectedSpecificationId && !uploadedFileUrl) || !testName.trim()}
                     className="gap-2"
                   >
                     <Save className="h-4 w-4" />

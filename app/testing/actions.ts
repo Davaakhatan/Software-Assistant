@@ -2,7 +2,6 @@
 
 import { getSupabaseAdmin } from "@/lib/supabase-admin"
 import { revalidatePath } from "next/cache"
-import { getSupabase } from "@/lib/supabase"
 import { generateText } from "ai"
 import { openai } from "@ai-sdk/openai"
 
@@ -109,14 +108,14 @@ export async function analyzeUploadedCode({ fileUrl, fileName }) {
   }
 }
 
-// Add this to your existing saveTestCases function
+// Update the saveTestCases function to match the actual database schema
 export async function saveTestCases(params: {
   testType: string
   framework: string
   componentToTest: string
   testCases: Array<{ description: string; expectation: string }>
   generatedTests: string
-  specificationId: string
+  specificationId: string | null
   designId: string | null
   generatedCodeId: string | null
   name: string
@@ -124,25 +123,48 @@ export async function saveTestCases(params: {
   uploadedFileName?: string | null
 }) {
   try {
-    const supabase = getSupabase()
+    console.log(
+      "Saving test cases with params:",
+      JSON.stringify({
+        ...params,
+        generatedTests: params.generatedTests ? "..." : null, // Don't log the full generated tests
+      }),
+    )
+
+    // Use the admin client to bypass RLS
+    const supabase = getSupabaseAdmin()
+
+    // Create a JSON object to store all the data that doesn't have dedicated columns
+    const generatedTestsJson = {
+      testCases: params.testCases,
+      designId: params.designId,
+      generatedCodeId: params.generatedCodeId,
+      uploadedFileUrl: params.uploadedFileUrl,
+      uploadedFileName: params.uploadedFileName,
+      // Include any other data that doesn't have a dedicated column
+    }
+
+    // Prepare the data to insert - only use columns that exist in the schema
+    const insertData = {
+      name: params.name,
+      test_type: params.testType,
+      framework: params.framework,
+      component_to_test: params.componentToTest,
+      component: params.componentToTest, // Use the component column as well
+      specification_id: params.specificationId,
+      generated_tests: JSON.stringify(generatedTestsJson), // Store all extra data as JSON
+    }
+
+    console.log(
+      "Inserting test case with data:",
+      JSON.stringify({
+        ...insertData,
+        generated_tests: "...", // Don't log the full generated tests
+      }),
+    )
 
     // Insert the test case into the database
-    const { data, error } = await supabase
-      .from("test_cases")
-      .insert({
-        name: params.name,
-        test_type: params.testType,
-        framework: params.framework,
-        component_name: params.componentToTest,
-        test_cases: params.testCases,
-        generated_tests: params.generatedTests,
-        specification_id: params.specificationId,
-        design_id: params.designId,
-        generated_code_id: params.generatedCodeId,
-        uploaded_file_url: params.uploadedFileUrl || null,
-        uploaded_file_name: params.uploadedFileName || null,
-      })
-      .select()
+    const { data, error } = await supabase.from("test_cases").insert(insertData).select()
 
     if (error) {
       console.error("Error saving test cases:", error)
@@ -152,6 +174,7 @@ export async function saveTestCases(params: {
       }
     }
 
+    console.log("Test case saved successfully:", data[0].id)
     return {
       success: true,
       data: data[0],
@@ -424,11 +447,11 @@ export async function getTestCases() {
       // Extract related IDs from JSON if they're not in the table columns
       return {
         ...testCase,
-        specification_id: testCase.specification_id || generatedTests.specification_id,
-        design_id: testCase.design_id || generatedTests.design_id,
-        generated_code_id: testCase.generated_code_id || generatedTests.generated_code_id,
-        uploaded_file_url: generatedTests.uploaded_file_url || null,
-        uploaded_file_name: generatedTests.uploaded_file_name || null,
+        specification_id: testCase.specification_id || generatedTests.specificationId,
+        design_id: generatedTests.designId || null,
+        generated_code_id: generatedTests.generatedCodeId || null,
+        uploaded_file_url: generatedTests.uploadedFileUrl || null,
+        uploaded_file_name: generatedTests.uploadedFileName || null,
       }
     })
 
@@ -535,11 +558,11 @@ export async function getTestCasesById(id) {
 
     const processedTestCase = {
       ...testCase,
-      specification_id: testCase.specification_id || generatedTests.specification_id,
-      design_id: testCase.design_id || generatedTests.design_id,
-      generated_code_id: testCase.generated_code_id || generatedTests.generated_code_id,
-      uploaded_file_url: generatedTests.uploaded_file_url || null,
-      uploaded_file_name: generatedTests.uploaded_file_name || null,
+      specification_id: testCase.specification_id || generatedTests.specificationId,
+      design_id: generatedTests.designId || null,
+      generated_code_id: generatedTests.generatedCodeId || null,
+      uploaded_file_url: generatedTests.uploadedFileUrl || null,
+      uploaded_file_name: generatedTests.uploadedFileName || null,
     }
 
     // Get specification data if available

@@ -112,7 +112,9 @@ export default function SavedTests() {
                       <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
                         <Badge variant="secondary">{testCase.test_type} tests</Badge>
                         <Badge variant="secondary">{testCase.framework}</Badge>
-                        {testCase.specifications && <Badge variant="outline">{testCase.specifications.app_name}</Badge>}
+                        {testCase.specifications && (
+                          <Badge variant="outline">{testCase.specifications?.app_name || "No specification"}</Badge>
+                        )}
                         {testCase.designs && <Badge variant="outline">{testCase.designs.type} design</Badge>}
                         {testCase.code_generations && (
                           <Badge variant="outline">
