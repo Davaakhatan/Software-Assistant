@@ -5,99 +5,102 @@ import { Button } from "@/components/ui/button"
 import { Trash } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { deleteTestCase } from "./actions"
+import { useRouter } from "next/navigation"
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 
 interface DeleteTestButtonProps {
-  testId: string
+  id: string
+  redirectTo?: string
   onSuccess?: () => void
 }
 
-export default function DeleteTestButton({ testId, onSuccess }: DeleteTestButtonProps) {
+export default function DeleteTestButton({ id, redirectTo, onSuccess }: DeleteTestButtonProps) {
   const { toast } = useToast()
+  const router = useRouter()
   const [isDeleting, setIsDeleting] = useState(false)
-  const [isOpen, setIsOpen] = useState(false)
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false)
 
   const handleDelete = async () => {
-    if (!testId) {
-      console.error("No test ID provided")
-      toast({
-        title: "Error",
-        description: "No test ID provided",
-        variant: "destructive",
-      })
-      return
-    }
+    if (!id) return
 
     setIsDeleting(true)
-    console.log("Deleting test case with ID:", testId)
-
     try {
-      const result = await deleteTestCase(testId)
+      const result = await deleteTestCase(id)
 
       if (result.success) {
         toast({
-          title: "Success",
-          description: "Test case deleted successfully",
+          title: "Test deleted",
+          description: "The test case has been deleted successfully.",
         })
-        setIsOpen(false)
+
+        // Call the onSuccess callback if provided
         if (onSuccess) {
           onSuccess()
         }
+
+        // Redirect if a redirect path is provided
+        if (redirectTo) {
+          router.push(redirectTo)
+        }
       } else {
-        console.error("Failed to delete test case:", result.error)
+        console.error("Error deleting test:", result.error)
         toast({
           title: "Error",
-          description: result.error || "Failed to delete test case",
+          description: result.error || "Failed to delete the test case.",
           variant: "destructive",
         })
       }
     } catch (error) {
-      console.error("Error deleting test case:", error)
+      console.error("Error in handleDelete:", error)
       toast({
         title: "Error",
-        description: "An unexpected error occurred",
+        description: "An unexpected error occurred while deleting the test case.",
         variant: "destructive",
       })
     } finally {
       setIsDeleting(false)
+      setShowConfirmDialog(false)
     }
   }
 
   return (
-    <AlertDialog open={isOpen} onOpenChange={setIsOpen}>
-      <AlertDialogTrigger asChild>
-        <Button variant="ghost" size="icon" onClick={() => setIsOpen(true)}>
-          <Trash className="h-4 w-4 text-red-500" />
-        </Button>
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This action cannot be undone. This will permanently delete the test case.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => setIsOpen(false)}>Cancel</AlertDialogCancel>
-          <Button
-            variant="destructive"
-            onClick={handleDelete}
-            disabled={isDeleting}
-            className="bg-red-500 hover:bg-red-600"
-          >
-            {isDeleting ? "Deleting..." : "Delete"}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setShowConfirmDialog(true)}
+        disabled={isDeleting}
+        className="text-destructive hover:bg-destructive/10"
+      >
+        <Trash className="h-4 w-4 mr-1" />
+        {isDeleting ? "Deleting..." : "Delete"}
+      </Button>
+
+      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the test case.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }

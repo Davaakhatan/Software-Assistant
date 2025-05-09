@@ -1018,7 +1018,9 @@ describe('${componentToTest.split("/").pop()}', () => {
       // Create a JSON object to store all the data
       const testData = {
         testCases: testCases,
-        testCode: generatedTests,
+        generatedCode: generatedTests, // Store the actual code in a field called generatedCode
+        testCode: generatedTests, // Also store it in testCode for backward compatibility
+        code: generatedTests, // And in code for even more compatibility
         designId: selectedDesignId || null,
         generatedCodeId: selectedCodeId || null,
         uploadedFileUrl: uploadedFileUrl || null,
@@ -1031,7 +1033,8 @@ describe('${componentToTest.split("/").pop()}', () => {
         framework,
         componentToTest,
         testCases,
-        generatedTests: JSON.stringify(testData),
+        generatedTests: JSON.stringify(testData), // Store the JSON string
+        rawTestCode: generatedTests, // Also pass the raw test code
         specificationId: selectedSpecificationId || null,
         designId: selectedDesignId || null,
         generatedCodeId: selectedCodeId || null,

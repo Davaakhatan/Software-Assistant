@@ -9,6 +9,7 @@ import { Loader2, FileCode, TestTube } from "lucide-react"
 import Link from "next/link"
 import DeleteTestButton from "./delete-test-button"
 import { Badge } from "@/components/ui/badge"
+import { routes } from "./routes"
 
 export default function SavedTests() {
   const { toast } = useToast()
@@ -134,12 +135,12 @@ export default function SavedTests() {
                     </div>
                     <div className="flex gap-2 mt-4 md:mt-0">
                       <Button variant="outline" size="sm" asChild>
-                        <Link href={`/testing/${testCase.id}`} className="flex items-center gap-2">
+                        <Link href={routes.testing.detail(testCase.id)} className="flex items-center gap-2">
                           <TestTube className="h-4 w-4" />
                           View Tests
                         </Link>
                       </Button>
-                      <DeleteTestButton testId={testCase.id} onSuccess={fetchTestCases} />
+                      <DeleteTestButton id={testCase.id} onSuccess={fetchTestCases} />
                     </div>
                   </div>
                 </Card>

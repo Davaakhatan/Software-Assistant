@@ -108,13 +108,14 @@ export async function analyzeUploadedCode({ fileUrl, fileName }) {
   }
 }
 
-// Update the saveTestCases function to match the actual database schema
+// Update the saveTestCases function to generate and store proper test code
 export async function saveTestCases(params: {
   testType: string
   framework: string
   componentToTest: string
   testCases: Array<{ description: string; expectation: string }>
   generatedTests: string
+  rawTestCode?: string
   specificationId: string | null
   designId: string | null
   generatedCodeId: string | null
@@ -127,39 +128,42 @@ export async function saveTestCases(params: {
       "Saving test cases with params:",
       JSON.stringify({
         ...params,
-        generatedTests: params.generatedTests ? "..." : null, // Don't log the full generated tests
+        generatedTests: params.generatedTests ? "..." : null,
+        rawTestCode: params.rawTestCode ? "..." : null,
       }),
     )
 
     // Use the admin client to bypass RLS
     const supabase = getSupabaseAdmin()
 
-    // Create a JSON object to store all the data that doesn't have dedicated columns
-    const generatedTestsJson = {
+    // Create a JSON object with all the test data
+    const testData = {
       testCases: params.testCases,
       designId: params.designId,
       generatedCodeId: params.generatedCodeId,
       uploadedFileUrl: params.uploadedFileUrl,
       uploadedFileName: params.uploadedFileName,
-      // Include any other data that doesn't have a dedicated column
+      // Include the raw test code if available
+      testCode:
+        params.rawTestCode || generateTestCodeFromCases(params.componentToTest, params.testCases, params.framework),
     }
 
-    // Prepare the data to insert - only use columns that exist in the schema
+    // Prepare the data to insert
     const insertData = {
       name: params.name,
       test_type: params.testType,
       framework: params.framework,
       component_to_test: params.componentToTest,
-      component: params.componentToTest, // Use the component column as well
+      component: params.componentToTest,
       specification_id: params.specificationId,
-      generated_tests: JSON.stringify(generatedTestsJson), // Store all extra data as JSON
+      generated_tests: JSON.stringify(testData),
     }
 
     console.log(
       "Inserting test case with data:",
       JSON.stringify({
         ...insertData,
-        generated_tests: "...", // Don't log the full generated tests
+        generated_tests: "...",
       }),
     )
 
@@ -184,6 +188,113 @@ export async function saveTestCases(params: {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to save test cases",
+    }
+  }
+}
+
+// Helper function to generate test code from test cases
+function generateTestCodeFromCases(componentName: string, testCases: any[], framework: string): string {
+  if (!testCases || testCases.length === 0) {
+    return "No test cases available to generate code"
+  }
+
+  // Default to Jest if framework is not specified
+  const testFramework = framework?.toLowerCase() || "jest"
+
+  if (testFramework.includes("jest")) {
+    return `// Generated Jest tests for ${componentName}
+import { ${componentName.includes("is") ? "" : "render, screen, fireEvent"} } from '${componentName.includes("is") ? "./" + componentName : "@testing-library/react"}';
+${componentName.includes("is") ? "" : `import ${componentName} from './${componentName}';`}
+
+describe('${componentName}', () => {
+  ${testCases
+    .map(
+      (tc) => `test('${tc.description}', () => {
+    ${generateTestImplementation(componentName, tc, testFramework)}
+  });`,
+    )
+    .join("\n\n  ")}
+});`
+  } else if (testFramework.includes("cypress")) {
+    return `// Generated Cypress tests for ${componentName}
+describe('${componentName}', () => {
+  beforeEach(() => {
+    cy.visit('/path-to-component');
+  });
+
+  ${testCases
+    .map(
+      (tc) => `it('${tc.description}', () => {
+    ${generateTestImplementation(componentName, tc, testFramework)}
+  });`,
+    )
+    .join("\n\n  ")}
+});`
+  } else if (testFramework.includes("mocha")) {
+    return `// Generated Mocha tests for ${componentName}
+import { expect } from 'chai';
+${componentName.includes("is") ? "" : `import { render, screen } from '@testing-library/react';`}
+${componentName.includes("is") ? "" : `import ${componentName} from './${componentName}';`}
+
+describe('${componentName}', () => {
+  ${testCases
+    .map(
+      (tc) => `it('${tc.description}', () => {
+    ${generateTestImplementation(componentName, tc, testFramework)}
+  });`,
+    )
+    .join("\n\n  ")}
+});`
+  } else {
+    // Generic test format
+    return `// Generated tests for ${componentName} using ${framework}
+describe('${componentName}', () => {
+  ${testCases
+    .map(
+      (tc) => `test('${tc.description}', () => {
+    ${generateTestImplementation(componentName, tc, testFramework)}
+  });`,
+    )
+    .join("\n\n  ")}
+});`
+  }
+}
+
+// Helper function to generate test implementation based on the test case
+function generateTestImplementation(componentName: string, testCase: any, framework: string): string {
+  const { description, expectation } = testCase
+
+  // Check if this is a function test (like isPalindrome) or a component test
+  if (componentName.startsWith("is") || description.toLowerCase().includes("function")) {
+    // Function test
+    if (expectation.includes("should return true")) {
+      const match = expectation.match(/isPalindrome$$([^)]+)$$/)
+      const input = match ? match[1] : "input"
+      return `expect(${componentName}(${input})).toBe(true);`
+    } else if (expectation.includes("should return false")) {
+      const match = expectation.match(/isPalindrome$$([^)]+)$$/)
+      const input = match ? match[1] : "input"
+      return `expect(${componentName}(${input})).toBe(false);`
+    } else {
+      return `// Test implementation for: ${expectation}
+    // Add your assertions here`
+    }
+  } else {
+    // Component test
+    if (description.includes("render")) {
+      return `render(<${componentName} />);
+    expect(screen.getByTestId('${componentName.toLowerCase()}')).toBeInTheDocument();`
+    } else if (description.includes("prop") || description.includes("property")) {
+      return `render(<${componentName} testProp="test" />);
+    expect(screen.getByText('test')).toBeInTheDocument();`
+    } else if (description.includes("click") || description.includes("interaction")) {
+      return `render(<${componentName} />);
+    const button = screen.getByRole('button');
+    fireEvent.click(button);
+    // Add assertions for the expected behavior after click`
+    } else {
+      return `// Test implementation for: ${expectation}
+    // Add your assertions here`
     }
   }
 }
@@ -300,7 +411,6 @@ describe('${params.componentToTest}', () => {
   }
 }
 
-// Add any other existing functions here...
 // The rest of the file remains the same...
 export async function getGeneratedCodeById(id) {
   try {
@@ -544,16 +654,21 @@ export async function getTestCasesById(id) {
       return { success: false, error: error.message }
     }
 
+    console.log("Raw test case data:", JSON.stringify(testCase, null, 2))
+
     // Extract related IDs from JSON if they're not in the table columns
     let generatedTests = {}
     try {
       if (typeof testCase.generated_tests === "string") {
         generatedTests = JSON.parse(testCase.generated_tests)
+        console.log("Parsed generated_tests:", JSON.stringify(generatedTests, null, 2))
       } else if (testCase.generated_tests && typeof testCase.generated_tests === "object") {
         generatedTests = testCase.generated_tests
+        console.log("Object generated_tests:", JSON.stringify(generatedTests, null, 2))
       }
     } catch (e) {
       console.error("Error parsing generated_tests:", e)
+      console.log("Raw generated_tests:", testCase.generated_tests)
     }
 
     const processedTestCase = {
