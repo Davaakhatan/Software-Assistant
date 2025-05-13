@@ -41,6 +41,7 @@ export default function TestCaseGenerator() {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [bucketReady, setBucketReady] = useState(false)
   const [isBucketLoading, setIsBucketLoading] = useState(true)
+  const [language, setLanguage] = useState("javascript")
 
   // Added for integration with specifications and designs
   const [specificationsList, setSpecificationsList] = useState([])
@@ -66,6 +67,20 @@ export default function TestCaseGenerator() {
   const [fileFramework, setFileFramework] = useState("")
   const [uploadedCodeContent, setUploadedCodeContent] = useState("")
   const [showUploadSection, setShowUploadSection] = useState(false)
+
+  // Get file extensions based on selected language
+  const getAcceptedFileExtensions = () => {
+    switch (language) {
+      case "javascript":
+        return ".js,.jsx,.ts,.tsx,.vue,.svelte"
+      case "python":
+        return ".py,.pyw"
+      case "java":
+        return ".java"
+      default:
+        return ".js,.jsx,.ts,.tsx,.vue,.svelte,.py,.pyw,.java"
+    }
+  }
 
   // Check if the bucket exists and create it if it doesn't using server action
   useEffect(() => {
@@ -374,6 +389,17 @@ export default function TestCaseGenerator() {
     fetchGeneratedCodeDetails()
   }, [selectedCodeId])
 
+  // Update framework based on language selection
+  useEffect(() => {
+    if (language === "javascript") {
+      setFramework("jest")
+    } else if (language === "python") {
+      setFramework("pytest")
+    } else if (language === "java") {
+      setFramework("junit")
+    }
+  }, [language])
+
   const addTestCase = () => {
     setTestCases([...testCases, { description: "", expectation: "" }])
   }
@@ -425,28 +451,31 @@ export default function TestCaseGenerator() {
 
     // Determine language from file extension
     const extension = filename.split(".").pop().toLowerCase()
-    let language = "javascript"
-    let framework = "react"
+    let detectedLanguage = "javascript"
+    let detectedFramework = "jest"
 
     if (extension === "ts" || extension === "tsx") {
-      language = "typescript"
+      detectedLanguage = "typescript"
     } else if (extension === "jsx") {
-      language = "javascript"
+      detectedLanguage = "javascript"
     } else if (extension === "vue") {
-      language = "javascript"
-      framework = "vue"
+      detectedLanguage = "javascript"
+      detectedFramework = "vue-test-utils"
     } else if (extension === "svelte") {
-      language = "javascript"
-      framework = "svelte"
+      detectedLanguage = "javascript"
+      detectedFramework = "svelte-testing-library"
+    } else if (extension === "py" || extension === "pyw") {
+      detectedLanguage = "python"
+      detectedFramework = "pytest"
+    } else if (extension === "java") {
+      detectedLanguage = "java"
+      detectedFramework = "junit"
     }
 
-    setFileLanguage(language)
-    setFileFramework(framework)
-
-    // Set test framework based on language
-    if (language === "typescript") {
-      setFramework("jest")
-    }
+    setFileLanguage(detectedLanguage)
+    setFileFramework(detectedFramework)
+    setLanguage(detectedLanguage)
+    setFramework(detectedFramework)
 
     toast({
       title: "File uploaded",
@@ -465,6 +494,7 @@ export default function TestCaseGenerator() {
       const result = await analyzeUploadedCode({
         fileUrl: url,
         fileName: filename,
+        language: fileLanguage,
       })
 
       if (result.success) {
@@ -523,6 +553,7 @@ export default function TestCaseGenerator() {
       const result = await generateAITestCases({
         testType,
         framework,
+        language,
         componentToTest,
         componentDescription,
         specificationData,
@@ -563,9 +594,17 @@ export default function TestCaseGenerator() {
         { description: "should handle user interactions", expectation: "component responds to user actions" },
       ])
 
-      setGeneratedTests(
-        `// Error generating tests: ${error.message}\n\n// Here's a basic test structure you can customize:\n\nimport { render, screen } from '@testing-library/react';\nimport ${componentToTest} from './${componentToTest}';\n\ndescribe('${componentToTest}', () => {\n  test('should render correctly', () => {\n    render(<${componentToTest} />);\n    // Add your assertions here\n  });\n});`,
-      )
+      // Generate fallback test code based on language
+      let fallbackCode = ""
+      if (language === "javascript" || language === "typescript") {
+        fallbackCode = `// Error generating tests: ${error.message}\n\n// Here's a basic test structure you can customize:\n\nimport { render, screen } from '@testing-library/react';\nimport ${componentToTest} from './${componentToTest}';\n\ndescribe('${componentToTest}', () => {\n  test('should render correctly', () => {\n    render(<${componentToTest} />);\n    // Add your assertions here\n  });\n});`
+      } else if (language === "python") {
+        fallbackCode = `# Error generating tests: ${error.message}\n\n# Here's a basic test structure you can customize:\n\nimport pytest\nfrom ${componentToTest.toLowerCase()} import ${componentToTest}\n\ndef test_${componentToTest.toLowerCase()}_works():\n    # Arrange\n    # Act\n    result = ${componentToTest}()\n    # Assert\n    assert result is not None`
+      } else if (language === "java") {
+        fallbackCode = `// Error generating tests: ${error.message}\n\n// Here's a basic test structure you can customize:\n\nimport org.junit.Test;\nimport static org.junit.Assert.*;\n\npublic class ${componentToTest}Test {\n    @Test\n    public void testBasicFunctionality() {\n        // Arrange\n        ${componentToTest} instance = new ${componentToTest}();\n        // Act\n        // Assert\n        assertNotNull(instance);\n    }\n}`
+      }
+
+      setGeneratedTests(fallbackCode)
 
       toast({
         title: "Error",
@@ -690,7 +729,7 @@ export default function TestCaseGenerator() {
       setTestCases(newTestCases)
 
       // Generate test code
-      const testCode = generateTestCode(testType, framework, componentName, newTestCases, appType)
+      const testCode = generateTestCode(testType, framework, language, componentName, newTestCases, appType)
       setGeneratedTests(testCode)
 
       toast({
@@ -709,9 +748,10 @@ export default function TestCaseGenerator() {
   }
 
   // Helper function to generate test code
-  const generateTestCode = (testType, framework, componentName, testCases, appType) => {
-    if (framework === "jest") {
-      return `// Generated ${testType} tests for ${componentName} using Jest and React Testing Library
+  const generateTestCode = (testType, framework, language, componentName, testCases, appType) => {
+    if (language === "javascript" || language === "typescript") {
+      if (framework === "jest") {
+        return `// Generated ${testType} tests for ${componentName} using Jest and React Testing Library
 
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -913,9 +953,9 @@ describe('${componentName}', () => {
     })
     .join("\n\n  ")}
 });`
-    } else if (framework === "vitest") {
-      // Similar structure for Vitest
-      return `// Generated ${testType} tests for ${componentName} using Vitest and React Testing Library
+      } else if (framework === "vitest") {
+        // Similar structure for Vitest
+        return `// Generated ${testType} tests for ${componentName} using Vitest and React Testing Library
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
@@ -926,12 +966,139 @@ describe('${componentName}', () => {
   // Similar test implementation as Jest but with Vitest syntax
   // ...
 });`
-    } else {
-      // Default for other frameworks
-      return `// Generated ${testType} tests for ${componentName} using ${framework}
+      } else {
+        // Default for other frameworks
+        return `// Generated ${testType} tests for ${componentName} using ${framework}
 
 // This is a placeholder for ${framework} test code
 // The structure would be similar to the Jest example but with ${framework}-specific syntax
+`
+      }
+    } else if (language === "python") {
+      if (framework === "pytest") {
+        return `# Generated ${testType} tests for ${componentName} using pytest
+
+import pytest
+from ${componentName.toLowerCase()} import ${componentName}
+
+${testCases
+  .map((tc) => {
+    return `def test_${tc.description.replace(/\s+/g, "_").toLowerCase()}():
+    # Arrange
+    ${componentName.toLowerCase()} = ${componentName}()
+    
+    # Act
+    result = ${componentName.toLowerCase()}.${tc.description.includes("render") ? "render()" : "process()"}
+    
+    # Assert
+    assert result is not None  # Replace with actual assertion for "${tc.expectation}"
+`
+  })
+  .join("\n")}
+`
+      } else if (framework === "unittest") {
+        return `# Generated ${testType} tests for ${componentName} using unittest
+
+import unittest
+from ${componentName.toLowerCase()} import ${componentName}
+
+class Test${componentName}(unittest.TestCase):
+${testCases
+  .map((tc) => {
+    return `    def test_${tc.description.replace(/\s+/g, "_").toLowerCase()}(self):
+        # Arrange
+        ${componentName.toLowerCase()} = ${componentName}()
+        
+        # Act
+        result = ${componentName.toLowerCase()}.${tc.description.includes("render") ? "render()" : "process()"}
+        
+        # Assert
+        self.assertIsNotNone(result)  # Replace with actual assertion for "${tc.expectation}"
+`
+  })
+  .join("\n")}
+
+if __name__ == '__main__':
+    unittest.main()
+`
+      } else {
+        return `# Generated ${testType} tests for ${componentName} using ${framework}
+
+# This is a placeholder for ${framework} test code
+# The structure would be similar to the pytest example but with ${framework}-specific syntax
+`
+      }
+    } else if (language === "java") {
+      if (framework === "junit") {
+        return `// Generated ${testType} tests for ${componentName} using JUnit
+
+import org.junit.Test;
+import static org.junit.Assert.*;
+
+public class ${componentName}Test {
+
+${testCases
+  .map((tc) => {
+    return `    @Test
+    public void test${tc.description
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join("")}() {
+        // Arrange
+        ${componentName} instance = new ${componentName}();
+        
+        // Act
+        Object result = instance.${tc.description.includes("render") ? "render()" : "process()"};
+        
+        // Assert
+        assertNotNull(result);  // Replace with actual assertion for "${tc.expectation}"
+    }
+`
+  })
+  .join("\n")}
+}
+`
+      } else if (framework === "testng") {
+        return `// Generated ${testType} tests for ${componentName} using TestNG
+
+import org.testng.annotations.Test;
+import static org.testng.Assert.*;
+
+public class ${componentName}Test {
+
+${testCases
+  .map((tc) => {
+    return `    @Test
+    public void test${tc.description
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join("")}() {
+        // Arrange
+        ${componentName} instance = new ${componentName}();
+        
+        // Act
+        Object result = instance.${tc.description.includes("render") ? "render()" : "process()"};
+        
+        // Assert
+        assertNotNull(result);  // Replace with actual assertion for "${tc.expectation}"
+    }
+`
+  })
+  .join("\n")}
+}
+`
+      } else {
+        return `// Generated ${testType} tests for ${componentName} using ${framework}
+
+// This is a placeholder for ${framework} test code
+// The structure would be similar to the JUnit example but with ${framework}-specific syntax
+`
+      }
+    } else {
+      return `// Generated ${testType} tests for ${componentName} using ${framework}
+
+// This is a placeholder for ${language} test code using ${framework}
+// Please customize this template based on your specific needs
 `
     }
   }
@@ -950,8 +1117,11 @@ describe('${componentName}', () => {
       // Simulate test generation delay
       await new Promise((resolve) => setTimeout(resolve, 2000))
 
-      // In a real app, this would call an AI service to generate tests
-      const sampleTests = `// Generated ${testType} tests for ${componentToTest} using ${framework}
+      // Generate test code based on language
+      let sampleTests = ""
+
+      if (language === "javascript" || language === "typescript") {
+        sampleTests = `// Generated ${testType} tests for ${componentToTest} using ${framework}
 
 import { render, screen, fireEvent } from '@testing-library/react';
 import ${componentToTest.split("/").pop()} from '${componentToTest}';
@@ -973,6 +1143,56 @@ describe('${componentToTest.split("/").pop()}', () => {
     )
     .join("\n")}
 });`
+      } else if (language === "python") {
+        sampleTests = `# Generated ${testType} tests for ${componentToTest} using ${framework}
+
+import pytest
+from ${componentToTest.toLowerCase()} import ${componentToTest}
+
+${testCases
+  .map(
+    (tc) => `
+def test_${tc.description.replace(/\s+/g, "_").toLowerCase()}():
+    # Arrange
+    instance = ${componentToTest}()
+    
+    # Act
+    # ... perform actions based on the test case
+    
+    # Assert
+    # ... verify ${tc.expectation}`,
+  )
+  .join("\n")}
+`
+      } else if (language === "java") {
+        sampleTests = `// Generated ${testType} tests for ${componentToTest} using ${framework}
+
+import org.junit.Test;
+import static org.junit.Assert.*;
+
+public class ${componentToTest}Test {
+${testCases
+  .map(
+    (tc) => `
+    @Test
+    public void test${tc.description
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join("")}() {
+        // Arrange
+        ${componentToTest} instance = new ${componentToTest}();
+        
+        // Act
+        // ... perform actions based on the test case
+        
+        // Assert
+        // ... verify ${tc.expectation}
+    }`,
+  )
+  .join("\n")}
+}
+`
+      }
 
       setGeneratedTests(sampleTests)
       setTestName(`${componentToTest.split("/").pop()} Tests`)
@@ -1025,12 +1245,15 @@ describe('${componentToTest.split("/").pop()}', () => {
         generatedCodeId: selectedCodeId || null,
         uploadedFileUrl: uploadedFileUrl || null,
         uploadedFileName: uploadedFileName || null,
+        language: language,
+        framework: framework,
       }
 
       // Use a minimal set of fields for saving
       const result = await saveTestCases({
         testType,
         framework,
+        language,
         componentToTest,
         testCases,
         generatedTests: JSON.stringify(testData), // Store the JSON string
@@ -1068,6 +1291,7 @@ describe('${componentToTest.split("/").pop()}', () => {
             JSON.stringify({
               testType,
               framework,
+              language,
               componentToTest,
               testCases,
               specificationId: selectedSpecificationId,
@@ -1095,12 +1319,27 @@ describe('${componentToTest.split("/").pop()}', () => {
   }
 
   const handleDownload = () => {
-    // In a real app, this would download the generated tests
+    // Determine file extension based on language and framework
+    let fileExtension = ".js"
+    if (language === "javascript") {
+      fileExtension = framework === "jest" ? ".test.js" : framework === "vitest" ? ".spec.js" : ".js"
+    } else if (language === "typescript") {
+      fileExtension = framework === "jest" ? ".test.tsx" : framework === "vitest" ? ".spec.tsx" : ".tsx"
+    } else if (language === "python") {
+      fileExtension = ".py"
+    } else if (language === "java") {
+      fileExtension = ".java"
+    }
+
+    // Create the file name
+    const fileName = `${testName || "generated-tests"}${fileExtension}`
+
+    // Create and download the file
     const blob = new Blob([generatedTests], { type: "text/plain" })
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `${testName || "generated-tests"}.${framework === "jest" ? "test.js" : framework === "vitest" ? "spec.js" : "js"}`
+    a.download = fileName
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -1108,7 +1347,7 @@ describe('${componentToTest.split("/").pop()}', () => {
 
     toast({
       title: "Tests downloaded",
-      description: "Your generated tests have been downloaded.",
+      description: `Your generated tests have been downloaded as ${fileName}.`,
     })
   }
 
@@ -1158,7 +1397,35 @@ describe('${componentToTest.split("/").pop()}', () => {
                 </Label>
               </div>
 
-              {/* New Upload Code Section */}
+              {/* Language Selection */}
+              <div className="space-y-4 border-t pt-4">
+                <Label className="text-base font-medium">Programming Language</Label>
+                <div className="grid grid-cols-3 gap-4">
+                  <Button
+                    variant={language === "javascript" ? "default" : "outline"}
+                    onClick={() => setLanguage("javascript")}
+                    className="w-full"
+                  >
+                    JavaScript/TypeScript
+                  </Button>
+                  <Button
+                    variant={language === "python" ? "default" : "outline"}
+                    onClick={() => setLanguage("python")}
+                    className="w-full"
+                  >
+                    Python
+                  </Button>
+                  <Button
+                    variant={language === "java" ? "default" : "outline"}
+                    onClick={() => setLanguage("java")}
+                    className="w-full"
+                  >
+                    Java
+                  </Button>
+                </div>
+              </div>
+
+              {/* Upload Code Section */}
               <div className="space-y-4 border-t pt-4">
                 <div className="flex items-center justify-between">
                   <Label className="text-base font-medium">Upload Code to Test</Label>
@@ -1188,6 +1455,7 @@ describe('${componentToTest.split("/").pop()}', () => {
                             bucket={STORAGE_BUCKET}
                             path="code-uploads"
                             onUploadComplete={handleUploadComplete}
+                            accept={getAcceptedFileExtensions()}
                           />
                         ) : (
                           <Alert variant="destructive">
@@ -1337,11 +1605,25 @@ describe('${componentToTest.split("/").pop()}', () => {
                         <SelectValue placeholder="Select framework" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="jest">Jest</SelectItem>
-                        <SelectItem value="vitest">Vitest</SelectItem>
-                        <SelectItem value="mocha">Mocha</SelectItem>
-                        <SelectItem value="cypress">Cypress</SelectItem>
-                        <SelectItem value="playwright">Playwright</SelectItem>
+                        {language === "javascript" || language === "typescript" ? (
+                          <>
+                            <SelectItem value="jest">Jest</SelectItem>
+                            <SelectItem value="vitest">Vitest</SelectItem>
+                            <SelectItem value="mocha">Mocha</SelectItem>
+                            <SelectItem value="cypress">Cypress</SelectItem>
+                            <SelectItem value="playwright">Playwright</SelectItem>
+                          </>
+                        ) : language === "python" ? (
+                          <>
+                            <SelectItem value="pytest">pytest</SelectItem>
+                            <SelectItem value="unittest">unittest</SelectItem>
+                          </>
+                        ) : language === "java" ? (
+                          <>
+                            <SelectItem value="junit">JUnit</SelectItem>
+                            <SelectItem value="testng">TestNG</SelectItem>
+                          </>
+                        ) : null}
                       </SelectContent>
                     </Select>
                   </div>
