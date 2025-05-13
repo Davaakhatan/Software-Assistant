@@ -7,9 +7,10 @@ import { openai } from "@ai-sdk/openai"
 
 // Existing functions...
 
-export async function analyzeUploadedCode({ fileUrl, fileName }) {
+// Find the analyzeUploadedCode function and update it to include the language parameter in the function signature
+export async function analyzeUploadedCode({ fileUrl, fileName, language = "javascript" }) {
   try {
-    console.log(`Analyzing uploaded code from ${fileUrl}`)
+    console.log(`Analyzing uploaded code from ${fileUrl} with language: ${language}`)
 
     // Get the file content
     const response = await fetch(fileUrl)
@@ -35,26 +36,74 @@ export async function analyzeUploadedCode({ fileUrl, fileName }) {
     let suggestedTestCases = []
 
     try {
-      const prompt = `
-        Analyze this code and provide:
-        1. A brief description of what this component/module does
-        2. 3-5 test cases that would be appropriate for testing it
-        3. The main component or function name that should be tested
+      // Adjust the prompt based on the language
+      let prompt = ""
 
-        Code:
-        \`\`\`
-        ${truncatedContent}
-        \`\`\`
+      if (language === "java") {
+        prompt = `
+          Analyze this Java code and provide:
+          1. A brief description of what this class/module does
+          2. 3-5 test cases that would be appropriate for testing it with JUnit
+          3. The main class name that should be tested
 
-        Respond in JSON format with the following structure:
-        {
-          "componentName": "string",
-          "description": "string",
-          "testCases": [
-            { "description": "string", "expectation": "string" }
-          ]
-        }
-      `
+          Code:
+          \`\`\`java
+          ${truncatedContent}
+          \`\`\`
+
+          Respond in JSON format with the following structure:
+          {
+            "componentName": "string", // The Java class name
+            "description": "string",
+            "testCases": [
+              { "description": "string", "expectation": "string" }
+            ]
+          }
+        `
+      } else if (language === "python") {
+        prompt = `
+          Analyze this Python code and provide:
+          1. A brief description of what this module/class does
+          2. 3-5 test cases that would be appropriate for testing it with pytest
+          3. The main class or function name that should be tested
+
+          Code:
+          \`\`\`python
+          ${truncatedContent}
+          \`\`\`
+
+          Respond in JSON format with the following structure:
+          {
+            "componentName": "string",
+            "description": "string",
+            "testCases": [
+              { "description": "string", "expectation": "string" }
+            ]
+          }
+        `
+      } else {
+        // Default JavaScript/TypeScript prompt
+        prompt = `
+          Analyze this code and provide:
+          1. A brief description of what this component/module does
+          2. 3-5 test cases that would be appropriate for testing it
+          3. The main component or function name that should be tested
+
+          Code:
+          \`\`\`
+          ${truncatedContent}
+          \`\`\`
+
+          Respond in JSON format with the following structure:
+          {
+            "componentName": "string",
+            "description": "string",
+            "testCases": [
+              { "description": "string", "expectation": "string" }
+            ]
+          }
+        `
+      }
 
       const { text } = await generateText({
         model: openai("gpt-3.5-turbo"),
@@ -64,7 +113,44 @@ export async function analyzeUploadedCode({ fileUrl, fileName }) {
       })
 
       try {
-        const analysis = JSON.parse(text)
+        // Try to extract JSON from the response, handling potential markdown formatting
+        let jsonText = text
+
+        // First, try to find JSON block in markdown format
+        const jsonMatch = text.match(/```(?:json)?\n([\s\S]*?)\n```/)
+        if (jsonMatch) {
+          jsonText = jsonMatch[1]
+        } else {
+          // If no markdown code block, try to find JSON object directly
+          const objectMatch = text.match(/{[\s\S]*}/)
+          if (objectMatch) {
+            jsonText = objectMatch[0]
+          }
+        }
+
+        // Clean the text before parsing
+        jsonText = jsonText.trim()
+
+        // Log the extracted JSON text for debugging
+        console.log("Extracted JSON text:", jsonText)
+
+        // Parse the JSON
+        let analysis
+        try {
+          analysis = JSON.parse(jsonText)
+        } catch (parseError) {
+          console.error("First JSON parse attempt failed:", parseError)
+
+          // Try to fix common JSON issues and parse again
+          // Sometimes the AI might include trailing commas or other invalid JSON syntax
+          const fixedJson = jsonText
+            .replace(/,(\s*[}\]])/g, "$1") // Remove trailing commas
+            .replace(/'/g, '"') // Replace single quotes with double quotes
+            .replace(/\n/g, " ") // Remove newlines
+
+          console.log("Attempting to parse fixed JSON:", fixedJson)
+          analysis = JSON.parse(fixedJson)
+        }
 
         if (analysis.componentName) {
           componentName = analysis.componentName
@@ -78,12 +164,70 @@ export async function analyzeUploadedCode({ fileUrl, fileName }) {
           suggestedTestCases = analysis.testCases
         }
       } catch (parseError) {
-        console.error("Error parsing AI response:", parseError)
+        console.error("Error parsing AI response:", parseError, "Raw response:", text)
         // Continue with default values
+
+        // Try to extract test cases manually if JSON parsing failed
+        try {
+          const testCasesMatch = text.match(/testCases"?\s*:\s*\[([\s\S]*?)\]/)
+          if (testCasesMatch) {
+            const testCasesText = testCasesMatch[1]
+            const testCaseMatches = testCasesText.match(/{\s*"description"[^}]*}/g)
+
+            if (testCaseMatches) {
+              suggestedTestCases = testCaseMatches.map((tc) => {
+                const descMatch = tc.match(/"description"[^"]*"([^"]*)"/)
+                const expMatch = tc.match(/"expectation"[^"]*"([^"]*)"/)
+
+                return {
+                  description: descMatch ? descMatch[1] : "Test case",
+                  expectation: expMatch ? expMatch[1] : "Expected behavior",
+                }
+              })
+            }
+          }
+
+          // Try to extract component name
+          const componentMatch = text.match(/"componentName"[^"]*"([^"]*)"/)
+          if (componentMatch) {
+            componentName = componentMatch[1]
+          }
+
+          // Try to extract description
+          const descriptionMatch = text.match(/"description"[^"]*"([^"]*)"/)
+          if (descriptionMatch && !descriptionMatch[1].includes("Test")) {
+            description = descriptionMatch[1]
+          }
+        } catch (extractError) {
+          console.error("Error extracting data manually:", extractError)
+        }
       }
     } catch (aiError) {
       console.error("Error using AI to analyze code:", aiError)
       // Continue with default values
+    }
+
+    // Generate language-specific default test cases if none were provided
+    if (suggestedTestCases.length === 0) {
+      if (language === "java") {
+        suggestedTestCases = [
+          { description: "should initialize correctly", expectation: "object is properly instantiated" },
+          {
+            description: "should execute main method without errors",
+            expectation: "method executes without throwing exceptions",
+          },
+        ]
+      } else if (language === "python") {
+        suggestedTestCases = [
+          { description: "should initialize correctly", expectation: "object is properly instantiated" },
+          { description: "should return expected output", expectation: "function returns correct result" },
+        ]
+      } else {
+        suggestedTestCases = [
+          { description: "should render correctly", expectation: "component renders without errors" },
+          { description: "should handle props correctly", expectation: "component uses props as expected" },
+        ]
+      }
     }
 
     return {
@@ -91,13 +235,8 @@ export async function analyzeUploadedCode({ fileUrl, fileName }) {
       componentName,
       description,
       codeContent,
-      suggestedTestCases:
-        suggestedTestCases.length > 0
-          ? suggestedTestCases
-          : [
-              { description: "should render correctly", expectation: "component renders without errors" },
-              { description: 'should handle props correctly", expectation": "component uses props as expected' },
-            ],
+      suggestedTestCases,
+      language,
     }
   } catch (error) {
     console.error("Error analyzing uploaded code:", error)
@@ -108,7 +247,7 @@ export async function analyzeUploadedCode({ fileUrl, fileName }) {
   }
 }
 
-// Update the saveTestCases function to generate and store proper test code
+// Update the saveTestCases function to generate and store proper test code\
 export async function saveTestCases(params: {
   testType: string
   framework: string
@@ -299,10 +438,85 @@ function generateTestImplementation(componentName: string, testCase: any, framew
   }
 }
 
+// Add this helper function to generate default test code based on language and framework
+// Add it after the generateTestImplementation function
+
+// Helper function to generate default test code
+function generateDefaultTestCode(language, framework, componentName, testCases) {
+  if (language === "java") {
+    return `// Generated tests for ${componentName} using ${framework}
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class ${componentName}Test {
+    ${testCases
+      .map(
+        (tc) => `
+    @Test
+    void test${tc.description
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join("")}() {
+        // Arrange
+        ${componentName} instance = new ${componentName}();
+        
+        // Act & Assert
+        // Test for: ${tc.expectation}
+        assertNotNull(instance);
+    }`,
+      )
+      .join("\n")}
+}`
+  } else if (language === "python") {
+    return `# Generated tests for ${componentName} using ${framework}
+
+import pytest
+from ${componentName.toLowerCase()} import ${componentName}
+
+${testCases
+  .map(
+    (tc) => `
+def test_${tc.description.replace(/\s+/g, "_").toLowerCase()}():
+    # Arrange
+    instance = ${componentName}()
+    
+    # Act & Assert
+    # Test for: ${tc.expectation}
+    assert instance is not None`,
+  )
+  .join("\n")}
+`
+  } else {
+    return `// Generated tests for ${componentName} using ${framework}
+
+import { render, screen } from '@testing-library/react';
+import ${componentName} from './${componentName}';
+
+describe('${componentName}', () => {
+  ${testCases
+    .map(
+      (tc) => `
+  test('${tc.description}', () => {
+    // Arrange
+    render(<${componentName} />);
+    
+    // Act & Assert
+    // Test for: ${tc.expectation}
+    expect(screen).toBeDefined();
+  });`,
+    )
+    .join("\n")}
+});`
+  }
+}
+
 // Add this to your existing generateAITestCases function
+// Update the generateAITestCases function to better handle Java code
 export async function generateAITestCases(params: {
   testType: string
   framework: string
+  language: string
   componentToTest: string
   componentDescription: string
   specificationData: any
@@ -313,15 +527,23 @@ export async function generateAITestCases(params: {
   uploadedCodeContent?: string
 }) {
   try {
-    // Prepare the prompt based on the available information
-    let prompt = `Generate ${params.testType} tests for a ${params.framework} project for the component "${params.componentToTest}".`
+    // Prepare the prompt based on the available information and language
+    let prompt = `Generate ${params.testType} tests for a ${params.framework} project`
+
+    if (params.language === "java") {
+      prompt += ` using Java`
+    } else if (params.language === "python") {
+      prompt += ` using Python`
+    } else {
+      prompt += ` for the component "${params.componentToTest}"`
+    }
 
     if (params.componentDescription) {
       prompt += `\n\nComponent description: ${params.componentDescription}`
     }
 
     if (params.uploadedCodeContent) {
-      prompt += `\n\nHere is the actual code of the component:\n\`\`\`\n${params.uploadedCodeContent}\n\`\`\``
+      prompt += `\n\nHere is the actual code to test:\n\`\`\`${params.language === "java" ? "java" : params.language === "python" ? "python" : ""}\n${params.uploadedCodeContent}\n\`\`\``
     }
 
     if (params.specificationData) {
@@ -332,11 +554,42 @@ export async function generateAITestCases(params: {
       prompt += `\n\nDesign information: ${JSON.stringify(params.designData, null, 2)}`
     }
 
-    prompt += `\n\nPlease generate:
-    1. A list of test cases in JSON format with "description" and "expectation" fields
-    2. The complete test code using ${params.framework}
-    
-    Format your response as a JSON object with fields: testCases and testCode.`
+    // Add language-specific instructions
+    if (params.language === "java") {
+      prompt += `\n\nPlease generate:
+      1. A list of test cases in JSON format with "description" and "expectation" fields
+      2. The complete JUnit test code for the class "${params.componentToTest}"
+      
+      Format your response as a JSON object with fields: testCases and testCode.
+      
+      For the testCode, make sure to:
+      - Use JUnit 5 annotations (@Test, @BeforeEach, etc.)
+      - Include proper imports
+      - Follow Java naming conventions
+      - Create a proper test class named "${params.componentToTest}Test"
+      - Include assertions for each test case`
+    } else if (params.language === "python") {
+      prompt += `\n\nPlease generate:
+      1. A list of test cases in JSON format with "description" and "expectation" fields
+      2. The complete pytest test code for the module "${params.componentToTest}"
+      
+      Format your response as a JSON object with fields: testCases and testCode.
+      
+      For the testCode, make sure to:
+      - Use pytest conventions
+      - Include proper imports
+      - Follow Python naming conventions (snake_case)
+      - Create test functions with names starting with "test_"
+      - Include assertions for each test case`
+    } else {
+      prompt += `\n\nPlease generate:
+      1. A list of test cases in JSON format with "description" and "expectation" fields
+      2. The complete test code using ${params.framework}
+      
+      Format your response as a JSON object with fields: testCases and testCode.`
+    }
+
+    console.log("Sending AI prompt for test generation:", prompt.substring(0, 200) + "...")
 
     // Use OpenAI to generate tests
     const { text } = await generateText({
@@ -350,28 +603,126 @@ export async function generateAITestCases(params: {
     let aiResponse
     try {
       // Extract JSON from the response (it might be wrapped in markdown code blocks)
-      const jsonMatch =
-        text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```\n([\s\S]*?)\n```/) || text.match(/{[\s\S]*?}/)
+      let jsonText = text
 
+      // First, try to find JSON block in markdown format
+      const jsonMatch = text.match(/```(?:json)?\n([\s\S]*?)\n```/)
       if (jsonMatch) {
-        aiResponse = JSON.parse(jsonMatch[1] || jsonMatch[0])
+        jsonText = jsonMatch[1]
       } else {
-        // If no JSON format is found, try to extract structured data from the text
-        const testCodeMatch = text.match(/```(?:javascript|typescript|jsx|tsx)?\n([\s\S]*?)\n```/)
+        // If no markdown code block, try to find JSON object directly
+        const objectMatch = text.match(/{[\s\S]*}/)
+        if (objectMatch) {
+          jsonText = objectMatch[0]
+        }
+      }
 
-        aiResponse = {
-          testCases: [
-            { description: "should render correctly", expectation: "component renders without errors" },
-            { description: "should handle user interactions", expectation: "component responds to user actions" },
-          ],
-          testCode: testCodeMatch ? testCodeMatch[1] : text,
+      // Clean the text before parsing
+      jsonText = jsonText.trim()
+
+      // Log the extracted JSON text for debugging
+      console.log("Extracted JSON text for test generation:", jsonText)
+
+      // Parse the JSON
+      try {
+        aiResponse = JSON.parse(jsonText)
+      } catch (parseError) {
+        console.error("First JSON parse attempt failed:", parseError)
+
+        // Try to fix common JSON issues and parse again
+        const fixedJson = jsonText
+          .replace(/,(\s*[}\]])/g, "$1") // Remove trailing commas
+          .replace(/'/g, '"') // Replace single quotes with double quotes
+          .replace(/\n/g, " ") // Remove newlines
+
+        console.log("Attempting to parse fixed JSON:", fixedJson)
+        aiResponse = JSON.parse(fixedJson)
+      }
+
+      // Validate the response structure
+      if (!aiResponse.testCases || !aiResponse.testCode) {
+        // If we have a partial response, try to extract what we can
+        if (!aiResponse.testCases && aiResponse.testCode) {
+          // Generate default test cases if only code is available
+          aiResponse.testCases = [
+            { description: "should initialize correctly", expectation: "component initializes without errors" },
+            {
+              description: "should perform expected operation",
+              expectation: "component performs the expected operation",
+            },
+          ]
+        } else if (aiResponse.testCases && !aiResponse.testCode) {
+          // Generate default test code if only test cases are available
+          aiResponse.testCode = generateDefaultTestCodeInner(
+            params.language,
+            params.framework,
+            params.componentToTest,
+            aiResponse.testCases,
+          )
         }
       }
     } catch (parseError) {
-      console.error("Error parsing AI response:", parseError)
+      console.error("Error parsing AI response:", parseError, "Raw response:", text)
 
-      // Create a fallback response
-      const testCode = `// Generated ${params.testType} tests for ${params.componentToTest} using ${params.framework}
+      // If parsing fails completely, extract test code from the response if available
+      const testCodeMatch = text.match(/```(?:javascript|typescript|jsx|tsx|java|python)?\n([\s\S]*?)\n```/)
+
+      // Create a fallback response based on language
+      let testCode = ""
+
+      if (params.language === "java") {
+        testCode = `// Generated ${params.testType} tests for ${params.componentToTest} using ${params.framework}
+
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class ${params.componentToTest}Test {
+    @Test
+    void shouldInitializeCorrectly() {
+        // Arrange
+        ${params.componentToTest} instance = new ${params.componentToTest}();
+        
+        // Act & Assert
+        assertNotNull(instance);
+    }
+    
+    @Test
+    void shouldPerformExpectedOperation() {
+        // Arrange
+        ${params.componentToTest} instance = new ${params.componentToTest}();
+        
+        // Act
+        // Call the method you want to test
+        
+        // Assert
+        // Add your assertions here
+    }
+}`
+      } else if (params.language === "python") {
+        testCode = `# Generated ${params.testType} tests for ${params.componentToTest} using ${params.framework}
+
+import pytest
+from ${params.componentToTest.toLowerCase()} import ${params.componentToTest}
+
+def test_initialize_correctly():
+    # Arrange
+    instance = ${params.componentToTest}()
+    
+    # Act & Assert
+    assert instance is not None
+
+def test_perform_expected_operation():
+    # Arrange
+    instance = ${params.componentToTest}()
+    
+    # Act
+    # Call the method you want to test
+    
+    # Assert
+    // Add your assertions here
+`
+      } else {
+        testCode = `// Generated ${params.testType} tests for ${params.componentToTest} using ${params.framework}
 
 import { render, screen } from '@testing-library/react';
 import ${params.componentToTest} from './${params.componentToTest}';
@@ -387,13 +738,17 @@ describe('${params.componentToTest}', () => {
     // Add your interaction tests here
   });
 });`
+      }
 
       aiResponse = {
         testCases: [
-          { description: "should render correctly", expectation: "component renders without errors" },
-          { description: "should handle user interactions", expectation: "component responds to user actions" },
+          { description: "should initialize correctly", expectation: "component initializes without errors" },
+          {
+            description: "should perform expected operation",
+            expectation: "component performs the expected operation",
+          },
         ],
-        testCode,
+        testCode: testCodeMatch ? testCodeMatch[1] : testCode,
       }
     }
 
@@ -408,6 +763,83 @@ describe('${params.componentToTest}', () => {
       success: false,
       error: error instanceof Error ? error.message : "Failed to generate AI test cases",
     }
+  }
+}
+
+// Helper function to generate default test code
+function generateDefaultTestCodeInner(
+  language: string,
+  framework: string,
+  componentToTest: string,
+  testCases: any[],
+): string {
+  if (language === "java") {
+    return `// Generated default JUnit tests for ${componentToTest}
+import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.*;
+
+class ${componentToTest}Test {
+    @Test
+    void shouldInitializeCorrectly() {
+        // Arrange
+        ${componentToTest} instance = new ${componentToTest}();
+        
+        // Act & Assert
+        assertNotNull(instance);
+    }
+    
+    @Test
+    void shouldPerformExpectedOperation() {
+        // Arrange
+        ${componentToTest} instance = new ${componentToTest}();
+        
+        // Act
+        // Call the method you want to test
+        
+        // Assert
+        // Add your assertions here
+    }
+}`
+  } else if (language === "python") {
+    return `# Generated default pytest tests for ${componentToTest}
+
+import pytest
+from ${componentToTest.toLowerCase()} import ${componentToTest}
+
+def test_initialize_correctly():
+    # Arrange
+    instance = ${componentToTest}()
+    
+    # Act & Assert
+    assert instance is not None
+
+def test_perform_expected_operation():
+    # Arrange
+    instance = ${componentToTest}()
+    
+    # Act
+    // Call the method you want to test
+    
+    # Assert
+    // Add your assertions here
+`
+  } else {
+    return `// Generated default tests for ${componentToTest} using ${framework}
+
+import { render, screen } from '@testing-library/react';
+import ${componentToTest} from './${componentToTest}';
+
+describe('${componentToTest}', () => {
+  test('should render correctly', () => {
+    render(<${componentToTest} />);
+    // Add your assertions here
+  });
+  
+  test('should handle user interactions', () => {
+    render(<${componentToTest} />);
+    // Add your interaction tests here
+  });
+});`
   }
 }
 

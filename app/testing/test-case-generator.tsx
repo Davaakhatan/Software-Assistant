@@ -483,18 +483,18 @@ export default function TestCaseGenerator() {
     })
 
     // Analyze the uploaded code
-    await handleCodeAnalysis(url, filename)
+    await handleCodeAnalysis(url, filename, detectedLanguage)
   }
 
   // Analyze the uploaded code
-  const handleCodeAnalysis = async (url, filename) => {
+  const handleCodeAnalysis = async (url, filename, detectedLanguage) => {
     setIsAnalyzingFile(true)
     try {
       // Call the server action to analyze the code
       const result = await analyzeUploadedCode({
         fileUrl: url,
         fileName: filename,
-        language: fileLanguage,
+        language: detectedLanguage || fileLanguage,
       })
 
       if (result.success) {
@@ -574,8 +574,11 @@ export default function TestCaseGenerator() {
       } else {
         // Fallback if no test cases were returned
         setTestCases([
-          { description: "should render correctly", expectation: "component renders without errors" },
-          { description: "should handle user interactions", expectation: "component responds to user actions" },
+          { description: "should initialize correctly", expectation: "component initializes without errors" },
+          {
+            description: "should perform expected operation",
+            expectation: "component performs the expected operation",
+          },
         ])
       }
 
@@ -590,18 +593,18 @@ export default function TestCaseGenerator() {
 
       // Even if there's an error, try to show something useful
       setTestCases([
-        { description: "should render correctly", expectation: "component renders without errors" },
-        { description: "should handle user interactions", expectation: "component responds to user actions" },
+        { description: "should initialize correctly", expectation: "component initializes without errors" },
+        { description: "should perform expected operation", expectation: "component performs the expected operation" },
       ])
 
       // Generate fallback test code based on language
       let fallbackCode = ""
-      if (language === "javascript" || language === "typescript") {
-        fallbackCode = `// Error generating tests: ${error.message}\n\n// Here's a basic test structure you can customize:\n\nimport { render, screen } from '@testing-library/react';\nimport ${componentToTest} from './${componentToTest}';\n\ndescribe('${componentToTest}', () => {\n  test('should render correctly', () => {\n    render(<${componentToTest} />);\n    // Add your assertions here\n  });\n});`
+      if (language === "java") {
+        fallbackCode = `// Error generating tests: ${error.message}\n\n// Here's a basic test structure you can customize:\n\nimport org.junit.jupiter.api.Test;\nimport static org.junit.jupiter.api.Assertions.*;\n\nclass ${componentToTest}Test {\n    @Test\n    void shouldInitializeCorrectly() {\n        // Arrange\n        ${componentToTest} instance = new ${componentToTest}();\n        \n        // Act & Assert\n        assertNotNull(instance);\n    }\n}`
       } else if (language === "python") {
-        fallbackCode = `# Error generating tests: ${error.message}\n\n# Here's a basic test structure you can customize:\n\nimport pytest\nfrom ${componentToTest.toLowerCase()} import ${componentToTest}\n\ndef test_${componentToTest.toLowerCase()}_works():\n    # Arrange\n    # Act\n    result = ${componentToTest}()\n    # Assert\n    assert result is not None`
-      } else if (language === "java") {
-        fallbackCode = `// Error generating tests: ${error.message}\n\n// Here's a basic test structure you can customize:\n\nimport org.junit.Test;\nimport static org.junit.Assert.*;\n\npublic class ${componentToTest}Test {\n    @Test\n    public void testBasicFunctionality() {\n        // Arrange\n        ${componentToTest} instance = new ${componentToTest}();\n        // Act\n        // Assert\n        assertNotNull(instance);\n    }\n}`
+        fallbackCode = `# Error generating tests: ${error.message}\n\n# Here's a basic test structure you can customize:\n\nimport pytest\nfrom ${componentToTest.toLowerCase()} import ${componentToTest}\n\ndef test_initialize_correctly():\n    # Arrange\n    instance = ${componentToTest}()\n    \n    # Act & Assert\n    assert instance is not None`
+      } else {
+        fallbackCode = `// Error generating tests: ${error.message}\n\n// Here's a basic test structure you can customize:\n\nimport { render, screen } from '@testing-library/react';\nimport ${componentToTest} from './${componentToTest}';\n\ndescribe('${componentToTest}', () => {\n  test('should render correctly', () => {\n    render(<${componentToTest} />);\n    // Add your assertions here\n  });\n});`
       }
 
       setGeneratedTests(fallbackCode)
